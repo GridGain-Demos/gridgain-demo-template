@@ -13,7 +13,8 @@ This project does **not** contain plugin source code — all custom Gradle tasks
 
 - **Java 17** required (enforced via Gradle toolchain). Kotlin DSL throughout.
 - Dependencies (including the plugin and UI) are resolved from Maven repos — primarily
-  `https://nexus.gridgain.com/repository/public-snapshots` (anonymous read access, no credentials required).
+  `https://maven.gridgain.com/nexus/content/repositories/gridgain-snapshots`.
+  Nexus credentials (`gridgainNexusUsername` / `gridgainNexusPassword`) must be in `~/.gradle/gradle.properties`.
 - **No `mavenLocal()`** — this template should never depend on locally published artifacts.
 - **No `includeBuild()`** — this template should never reference sibling project directories.
 - **SnakeYAML** is forced to `1.33` to prevent Android variant conflicts. This is intentional.

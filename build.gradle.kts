@@ -30,7 +30,11 @@ repositories {
     }
     maven {
         name = "GridGainSnapshots"
-        url = uri("https://nexus.gridgain.com/repository/public-snapshots")
+        url = uri("https://maven.gridgain.com/nexus/content/repositories/gridgain-snapshots")
+        credentials {
+            username = providers.gradleProperty("gridgainNexusUsername").orNull
+            password = providers.gradleProperty("gridgainNexusPassword").orNull
+        }
     }
 }
 
