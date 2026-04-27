@@ -29,12 +29,8 @@ repositories {
         url = uri("https://maven.gridgain.com/nexus/content/repositories/external-beta")
     }
     maven {
-        name = "GridGainSnapshots"
-        url = uri("https://maven.gridgain.com/nexus/content/repositories/gridgain-snapshots")
-        credentials {
-            username = providers.gradleProperty("gridgainNexusUsername").orNull
-            password = providers.gradleProperty("gridgainNexusPassword").orNull
-        }
+        name = "GridGainNexus"
+        url = uri("https://nexus.gridgain.com/repository/public-snapshots/")
     }
 }
 
@@ -54,7 +50,7 @@ dependencies {
     implementation("org.yaml:snakeyaml:1.33")
     implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.5.0-SNAPSHOT")
     // UI project — provides the Ktor server for launchDemoUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.1.0-SNAPSHOT")
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.5.0-SNAPSHOT")
     implementation("org.gridgain:ignite-core:9.1.3")
     implementation("org.gridgain:ignite-api:9.1.3")
     implementation("org.gridgain:ignite-runner:9.1.3")

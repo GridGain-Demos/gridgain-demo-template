@@ -11,12 +11,8 @@ pluginManagement {
             url = uri("https://maven.gridgain.com/nexus/content/repositories/external-beta")
         }
         maven {
-            name = "GridGainSnapshots"
-            url = uri("https://maven.gridgain.com/nexus/content/repositories/gridgain-snapshots")
-            credentials {
-                username = providers.gradleProperty("gridgainNexusUsername").orNull
-                password = providers.gradleProperty("gridgainNexusPassword").orNull
-            }
+            name = "GridGainNexus"
+            url = uri("https://nexus.gridgain.com/repository/public-snapshots/")
         }
     }
 }
