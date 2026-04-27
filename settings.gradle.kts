@@ -12,7 +12,7 @@ pluginManagement {
         }
         maven {
             name = "GridGainSnapshots"
-            url = uri("https://nexus.gridgain.com/public-snapshots")
+            url = uri("https://nexus.gridgain.com/repository/public-snapshots")
         }
     }
 }
