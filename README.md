@@ -8,10 +8,11 @@ To get started, clone this repo into a directory with your p, rename it, drop in
 configuration, and the plugin's tasks (e.g. `validateRequirements`,
 `launchPluginUi`) will be available immediately.
 
-
+Review the [project goals presentation](https://docs.google.com/presentation/d/1EafadCta4LH6VcilLQFJ4wfXdda5J67i/edit?slide=id.p1#slide=id.p1).
 
 ## Prerequisites
-- Java 17 (the Gradle toolchain will download it if missing).
+- Java 17 (the Gradle toolchain will download it if missing)
+- git cli
 
 You will need access to a GridGain cloud account. If you do not have this, please request it
 via the [Support Portal](https://support.gridgain.com/)
@@ -27,55 +28,32 @@ Please do that before using the tool.
       in the top-right corner of the console page.
     - Create a user in the [IAM Dashboard] (https://console.aws.amazon.com/iam/home) The user must have the following
       permissions (at a minimum)
+        - AmazonEC2FullAccess 
         - AmazonVPCFullAccess
         - AWSCloudFormationFullAccess
         - IAMFullAccess
-        - On the IAM user's Permissions tab, select Add Permissions -> Create inline policy -> JSON and paste the following:
-          `{                                                                                                                                                                                                                           
-          "Version": "2012-10-17",                                   
-          "Statement": [                                               
-          {                                                         
-          "Sid": "EksUserActions",
-          "Effect": "Allow",                                                                                                                                                                                                    
-          "Action": [
-          "eks:CreateCluster",                                                                                                                                                                                                
-          "eks:DescribeCluster",                               
-          "eks:ListClusters",                                                                                                                                                                                                 
-          "eks:UpdateClusterConfig",                            
-          "eks:UpdateClusterVersion",                                                                                                                                                                                         
-          "eks:DeleteCluster",                                                                                                                                                                                                
-          "eks:CreateNodegroup",
-          "eks:DescribeNodegroup",                                                                                                                                                                                            
-          "eks:ListNodegroups",                                
-          "eks:UpdateNodegroupConfig",                                                                                                                                                                                        
-          "eks:UpdateNodegroupVersion",                         
-          "eks:DeleteNodegroup",                                                                                                                                                                                              
-          "eks:CreateAddon",                                   
-          "eks:DescribeAddon",                                                                                                                                                                                                
-          "eks:DescribeAddonVersions",                          
-          "eks:ListAddons",                                                                                                                                                                                                   
-          "eks:UpdateAddon",                                   
-          "eks:DeleteAddon",                                                                                                                                                                                                  
-          "eks:DescribeUpdate",                                 
-          "eks:ListUpdates",                                                                                                                                                                                                  
-          "eks:TagResource",                                   
-          "eks:UntagResource",                                                                                                                                                                                                
-          "eks:ListTagsForResource",                            
-          "eks:AssociateIdentityProviderConfig",                                                                                                                                                                              
-          "eks:DescribeIdentityProviderConfig",                                                                                                                                                                               
-          "eks:DisassociateIdentityProviderConfig"
-          ],                                                                                                                                                                                                                    
-          "Resource": "*"                                        
-          }                                                                                                                                                                                                                       
-          ]                                                           
+        - AutoScalingFullAccess 
+        - ElasticLoadBalancingFullAccess
+      - On the IAM user's Permissions tab, select Add Permissions -> Create inline policy -> JSON and paste the following:
+      ```
+          {                  
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+              "Sid": "EksUserActions",
+              "Effect":"Allow",                           
+              "Action":[
+                "eks:*"
+                ], 
+              "Resource": "*"                                        
+              }                                       
+            ]                                                           
           }
-          `
+        ```
           
-          Select 'next' and give this profile a name, (suggested) `eksctl`
+        Select 'Next' and give this profile a name, (suggested) `eksctl`
     - On the Security credentials tab of the new user's info, create and save an access key of type Command Line Interface (CLI)
-    - Install the AWS CLI `brew install awscli`
-    - Install eksctl `brew install eksctl`
-    - Install kubectl `brew install kubectl`
+    - Install the AWS CLI `brew install awscli eksctl kubectl`
     - Configure an AWS CLI profile  `aws configure --profile <my-demo-profile>`
         - Supply it with the AWS Access Key (from above)
         - Supply it with the AWS Secret Access Key (from above)
@@ -100,7 +78,8 @@ Please do that before using the tool.
 ## Quickstart
 
 ```bash
-# 1. Copy this directory to your new project location.
+# 1.  Clone the template into a directory and make a copy to your new project location.
+git clone https://github.com/GridGain-Demos/gridgain-demo-template
 cp -r gridgain-demo-template ../my-demo
 cd ../my-demo
 
@@ -115,6 +94,14 @@ cd ../my-demo
 
 # 5. When you want a fresh git history:
 rm -rf .git && git init && git add . && git commit -m "Initial commit"
+
+# 6. Copy the configuration file template to be your configuration file and edit the copy.
+
+cp .src/main/resources/demo-config.yaml.template ./src/main/resources/demo-config.yaml
+
+# 7. Start the Plugin UI and edit the configuration file
+./gradlew launchPluginUi
+
 ```
 
 ## What's in here
@@ -135,9 +122,6 @@ Three edit points:
 1. `settings.gradle.kts` — `rootProject.name = "..."`.
 2. `build.gradle.kts` — `group = "..."` (and `version` if desired).
 3. The containing directory name on disk.
-
-Then `cp src/main/resources/demo-config.yaml.template src/main/resources/demo-config.yaml`
-and edit the copy.
 
 ## Secrets handling
 
