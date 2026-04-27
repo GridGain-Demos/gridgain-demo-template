@@ -1,28 +1,19 @@
 pluginManagement {
     repositories {
-        mavenLocal()
         gradlePluginPortal()
         mavenCentral()
         maven {
             name = "GridGain External Repository"
             url = uri("https://maven.gridgain.com/nexus/content/repositories/external")
         }
-    }
-}
-
-// Use the local plugin build directly to avoid publishing to mavenLocal during development
-includeBuild("../gridgain-demo-gradle-plugin"){
-    dependencySubstitution {
-        substitute(module("com.gridgain.demo:gridgain-demo-gradle-plugin"))
-            .using(project(":"))
-    }
-}
-
-// Include the UI project so `launchDemoUi` can find it on the classpath
-includeBuild("../gridgain-demo-ui") {
-    dependencySubstitution {
-        substitute(module("com.gridgain.demo:gridgain-demo-ui"))
-            .using(project(":"))
+        maven {
+            name = "GridGain Beta Repository"
+            url = uri("https://maven.gridgain.com/nexus/content/repositories/external-beta")
+        }
+        maven {
+            name = "GridGainSnapshots"
+            url = uri("https://nexus.gridgain.com/public-snapshots")
+        }
     }
 }
 

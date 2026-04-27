@@ -19,11 +19,18 @@ group = "org.gridgain.demo"
 version = "1.0-SNAPSHOT"
 
 repositories {
-    mavenLocal()  // Required for SNAPSHOT dependencies
     mavenCentral()
     maven {
         name = "GridGain External Repository"
         url = uri("https://maven.gridgain.com/nexus/content/repositories/external")
+    }
+    maven {
+        name = "GridGain Beta Repository"
+        url = uri("https://maven.gridgain.com/nexus/content/repositories/external-beta")
+    }
+    maven {
+        name = "GridGainSnapshots"
+        url = uri("https://nexus.gridgain.com/public-snapshots")
     }
 }
 
@@ -66,8 +73,7 @@ tasks.named("check").configure {
     dependsOn("validateRequirements")
 }
 
-// Ensure launchDemoUi rebuilds the UI project (including frontend) when sources change.
-// Without this, Gradle's composite build may not detect changes in the UI project.
+// Ensure launchDemoUi picks up changes to the UI dependency on the runtime classpath.
 tasks.named("launchDemoUi") {
     inputs.files(configurations.named("runtimeClasspath"))
 }

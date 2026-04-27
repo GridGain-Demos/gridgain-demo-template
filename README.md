@@ -1,16 +1,19 @@
 # gridgain-demo-template
 
 A minimal shell for creating a new GridGain demo project driven by the
-[`gridgain-demo-gradle-plugin`](../gridgain-demo-gradle-plugin).
-Clone it, rename it, drop in your own code and configuration, and the plugin's
-tasks (e.g. `validateRequirements`, `launchDemoUi`) will be available immediately.
+`gridgain-demo-gradle-plugin`. Clone it, rename it, drop in your own code and
+configuration, and the plugin's tasks (e.g. `validateRequirements`,
+`launchPluginUi`) will be available immediately.
 
 ## Prerequisites
 
 - Java 17 (the Gradle toolchain will download it if missing).
-- Sibling projects present at `../gridgain-demo-gradle-plugin` and
-  `../gridgain-demo-ui`. The `settings.gradle.kts` uses `includeBuild(...)` to
-  consume them directly — no `publishToMavenLocal` step is required.
+- Access to the GridGain Snapshots Maven repository. Add your credentials to
+  `~/.gradle/gradle.properties`:
+  ```properties
+  gridgainNexusUsername=<your-username>
+  gridgainNexusPassword=<your-password>
+  ```
 
 ## Quickstart
 
@@ -36,7 +39,7 @@ rm -rf .git && git init && git add . && git commit -m "Initial commit"
 
 | Path | Purpose |
 |------|---------|
-| `settings.gradle.kts` | Sets `rootProject.name`; `includeBuild`s the plugin + UI siblings. |
+| `settings.gradle.kts` | Sets `rootProject.name`; resolves the plugin and UI from GridGain Maven repos. |
 | `build.gradle.kts` | Applies `com.gridgain.demo.plugin`; depends on GridGain 9 runtime + the UI project. |
 | `gradle.properties` | Points the plugin at `src/main/resources/demo-config.yaml`. |
 | `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`; seeds `demo-config.yaml`. |
@@ -64,5 +67,5 @@ also gitignored.
 
 ## Further reading
 
-See the plugin's own README in `../gridgain-demo-gradle-plugin/` for the full
-list of tasks, configuration schema, and processing-pipeline details.
+See the plugin's own documentation for the full list of tasks, configuration
+schema, and processing-pipeline details.
