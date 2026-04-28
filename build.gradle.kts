@@ -12,7 +12,7 @@ buildscript {
 
 plugins {
     java
-    id("com.gridgain.demo.plugin") version "0.5.0-SNAPSHOT"
+    id("com.gridgain.demo.plugin") version "0.0.5-SNAPSHOT"
 }
 
 group = "org.gridgain.demo"
@@ -48,9 +48,9 @@ configurations.all {
 dependencies {
     // Explicitly add standard SnakeYAML to override any Android variants
     implementation("org.yaml:snakeyaml:1.33")
-    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.5.0-SNAPSHOT")
+    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.0.5-SNAPSHOT")
     // UI project — provides the Ktor server for launchDemoUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.5.0-SNAPSHOT")
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.0.5-SNAPSHOT")
     implementation("org.gridgain:ignite-core:9.1.3")
     implementation("org.gridgain:ignite-api:9.1.3")
     implementation("org.gridgain:ignite-runner:9.1.3")

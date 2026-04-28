@@ -15,7 +15,7 @@ Review the [project goals presentation](https://docs.google.com/presentation/d/1
 - git cli
 
 You will need access to a GridGain cloud account. If you do not have this, please request it
-via the [Support Portal](https://support.gridgain.com/)
+via the [Support Portal](https://it.gridgain.com/portal/22)
 
 The plugin **DOES NOT** handle the permutations and combinations of setting up cloud CLIs and logging in.
 Please do that before using the tool.
