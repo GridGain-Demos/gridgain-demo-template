@@ -23,11 +23,11 @@ This repo contains a minimal shell that is preconfigured for creating a new Grid
 
 There are mulltiple ways to incorporate the toolkit into your project, with the use of this repo being only one option.
 
-1. If you haven't started your project yet, you can follow [these](## Starting with the template) instructions below to start a new project directory that is preconfigured for gradle.
+1. If you haven't started your project yet, you can follow [these](#starting-with-the-template) instructions below to start a new project directory that is preconfigured for gradle.
 
-2. If you have started your project, but it doesn't use gradle, it may be easiest just to do the same as above, follow [these](## Starting with the template) instructions, and copy your exsiting files into that directory.
+2. If you have started your project, but it doesn't use gradle, it may be easiest just to do the same as above, follow [these](#starting-with-the-template) instructions, and copy your existing files into that directory.
 
-3. If you already have a gradle project you can follow [these](## Adding to an existing gradle project) instructions to incorporate the toolkit into your exsiting project. You should review the
+3. If you already have a gradle project you can follow [these](#adding-to-an-existing-gradle-project) instructions to incorporate the toolkit into your existing project. You should review the
 complexity of those instructions before choosing this option.
 
 
@@ -48,7 +48,7 @@ Please do that before using the tool.
       For SEs, SAs and TAMs, this is a shared account, and we should all have the administrative permissions needed.
       The shared account number is `930793918939`. Otherwise, the account number should be available from a dropdown
       in the top-right corner of the console page.
-    - Create a user in the [IAM Dashboard] (https://console.aws.amazon.com/iam/home) The user must have the following
+    - Create a user in the [IAM Dashboard](https://console.aws.amazon.com/iam/home) The user must have the following
       permissions (at a minimum)
         - AmazonEC2FullAccess 
         - AmazonVPCFullAccess
