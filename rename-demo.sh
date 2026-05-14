@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# rename-demo.sh — initialize this template as a new GridGain demo project.
+# rename-demo.sh — set this template's Gradle identity for a new demo project.
 #
 # Usage:
 #   ./rename-demo.sh <new-project-name> [<new-group>]
@@ -10,9 +10,10 @@
 # What this does:
 #   1. Sets `rootProject.name` in settings.gradle.kts to <new-project-name>.
 #   2. If <new-group> provided, sets `group = "..."` in build.gradle.kts.
-#   3. Copies src/main/resources/demo-config.yaml.template to demo-config.yaml
-#      if it doesn't already exist (the .template stays under version control;
-#      demo-config.yaml is gitignored because it will contain secrets).
+#
+# That's all. This script no longer seeds demo-config.yaml — that responsibility
+# moved to ./gradlew initDemoConfig (the wizard). See the README for the full
+# onboarding flow.
 #
 # This script does NOT rename the containing directory — do that yourself.
 # It does NOT initialize git — do that yourself if you want a fresh history.
@@ -81,21 +82,6 @@ if [[ -n "$NEW_GROUP" ]]; then
     echo "Updated build.gradle.kts: group = \"${NEW_GROUP}\""
 fi
 
-# 3. Seed demo-config.yaml from the template (if not already present).
-CONFIG_DIR="src/main/resources"
-TEMPLATE="${CONFIG_DIR}/demo-config.yaml.template"
-TARGET="${CONFIG_DIR}/demo-config.yaml"
-if [[ -f "$TEMPLATE" ]]; then
-    if [[ -f "$TARGET" ]]; then
-        echo "Skipped: ${TARGET} already exists."
-    else
-        cp "$TEMPLATE" "$TARGET"
-        echo "Created ${TARGET} from template (edit it to configure your demo)."
-    fi
-else
-    echo "WARNING: ${TEMPLATE} not found; skipping demo-config.yaml creation." >&2
-fi
-
 cat <<EOF
 
 Done.
@@ -103,7 +89,15 @@ Done.
 Next steps:
   1. Rename the containing directory to '${NEW_NAME}' if you haven't already:
        cd .. && mv "$(basename "$SCRIPT_DIR")" "${NEW_NAME}"
-  2. Edit ${TARGET} and fill in the <YOUR_...> placeholders.
+  2. Generate src/main/resources/demo-config.yaml using the wizard:
+       ./gradlew initDemoConfig \\
+           -Pwizard.cloud=gke[,eks] \\
+           -Pwizard.ggVersion=9[,8] \\
+           -Pwizard.monitor=control-center \\
+           -Pwizard.secret.gcp_account=<value> ...
+     Or hand-edit:
+       cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
+       \$EDITOR src/main/resources/demo-config.yaml
   3. Initialize git if you want a fresh history:
        rm -rf .git && git init && git add . && git commit -m "Initial commit from gridgain-demo-template"
   4. List available tasks:

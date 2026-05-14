@@ -12,7 +12,7 @@ buildscript {
 
 plugins {
     java
-    id("com.gridgain.demo.plugin") version "0.0.5-SNAPSHOT"
+    id("com.gridgain.demo.plugin") version "0.5.1-SNAPSHOT"
 }
 
 group = "org.gridgain.demo"
@@ -48,9 +48,9 @@ configurations.all {
 dependencies {
     // Explicitly add standard SnakeYAML to override any Android variants
     implementation("org.yaml:snakeyaml:1.33")
-    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.0.5-SNAPSHOT")
-    // UI project — provides the Ktor server for launchDemoUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.0.5-SNAPSHOT")
+    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.5.1-SNAPSHOT")
+    // UI project — provides the Ktor server for launchPluginUi task
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.5.1-SNAPSHOT")
     implementation("org.gridgain:ignite-core:9.1.3")
     implementation("org.gridgain:ignite-api:9.1.3")
     implementation("org.gridgain:ignite-runner:9.1.3")
@@ -73,8 +73,8 @@ tasks.named("check").configure {
     dependsOn("validateRequirements")
 }
 
-// Ensure launchDemoUi picks up changes to the UI dependency on the runtime classpath.
-tasks.named("launchDemoUi") {
+// Ensure launchPluginUi picks up changes to the UI dependency on the runtime classpath.
+tasks.named("launchPluginUi") {
     inputs.files(configurations.named("runtimeClasspath"))
 }
 

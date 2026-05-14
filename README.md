@@ -23,11 +23,11 @@ This repo contains a minimal shell that is preconfigured for creating a new Grid
 
 There are mulltiple ways to incorporate the toolkit into your project, with the use of this repo being only one option.
 
-1. If you haven't started your project yet, you can follow [these](#starting-with-the-template) instructions below to start a new project directory that is preconfigured for gradle.
+1. If you haven't started your project yet, you can follow [these](#starting-a-new-project-using-the-template) instructions below to start a new project directory that is preconfigured for gradle.
 
-2. If you have started your project, but it doesn't use gradle, it may be easiest just to do the same as above, follow [these](#starting-with-the-template) instructions, and copy your existing files into that directory.
+2. If you have started your project, but it doesn't use gradle, it may be easiest just to do the same as above, follow [these](#starting-a-new-project-using-the-template) instructions, and copy your existing files into that directory.
 
-3. If you already have a gradle project you can follow [these](#adding-to-an-existing-gradle-project) instructions to incorporate the toolkit into your existing project. You should review the
+3. If you already have a gradle project you can follow [these](#adding-the-toolkit-to-an-existing-gradle-project) instructions to incorporate the toolkit into your existing project. You should review the
 complexity of those instructions before choosing this option.
 
 
@@ -108,37 +108,74 @@ Alternatively, you could clone this repo anywhere, not copy it, and run Step 5 o
 
 There is no dependency on the original repo cloned to your computer after a copy is made.
 
+### Primary path — wizard-driven
+
 ```bash
-# 1.  Clone the template into a directory and make a copy to your new project location.
+# 1.  Clone the template and copy it to your new project location.
 git clone https://github.com/GridGain-Demos/gridgain-demo-template
 cp -r gridgain-demo-template ../my-demo
 cd ../my-demo
 
-# 2. Optional - This only matters if you intend to package and publish your project as maven artifacts or jar files for use in other projects. There is a convenience script to reset the default name used in the template.
-
+# 2. Optional — only matters if you'll publish your project as Maven artifacts. The script
+#    sets rootProject.name (and optionally group). It no longer seeds demo-config.yaml.
 ./rename-demo.sh my-demo com.example.mydemo
 
-# 4. Verify the plugin is working correctly:
+# 3. Generate src/main/resources/demo-config.yaml using the wizard.
+#    The wizard prunes sections you don't need (per cloud / GG version / monitor choice)
+#    and substitutes <YOUR_*> placeholders with the values you supply.
+#    Pick the dimensions and secrets that apply to you:
+./gradlew initDemoConfig \
+    -Pwizard.cloud=gke \
+    -Pwizard.ggVersion=9 \
+    -Pwizard.monitor=control-center \
+    -Pwizard.secret.gcp_account=you@example.com \
+    -Pwizard.secret.gcp_project=demo-project \
+    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json \
+    -Pwizard.secret.cc_license_file=controlcenter/controlcenter-license.xml \
+    -Pwizard.secret.cc_admin_email=admin@example.com \
+    -Pwizard.secret.cc_admin_password='<password>'
+# A missing-secret error lists every -Pwizard.secret.* property required for your
+# chosen dimensions, so you can correct in one re-run.
 
+# 4. Verify the wizard's output and the plugin wiring.
+./gradlew validateDemoConfiguration
 ./gradlew tasks
 
-# 5. Optional, does no harm - critical if you want to use git to backup your project
+# 5. Optional — clear the template's git history so this is your project's history.
 rm -rf .git && git init && git add . && git commit -m "Initial commit"
+# Or, if you don't intend to use git, remove the git artifacts entirely:
+rm -rf .git && rm .gitignore
 
-# 6. Copy the configuration file template to be your configuration file and edit the copy.
-#    Then replace the <YOUR_...> placeholders with your account, licenses, namespaces, etc.
-
-cp .src/main/resources/demo-config.yaml.template ./src/main/resources/demo-config.yaml
-
-# 7. Start the Plugin UI and edit the configuration file
+# 6. Use the UI to clone clusters or fine-tune your configuration.
 ./gradlew launchPluginUi
-
 ```
+
+### Alternate path — hand-edit the starter (no wizard)
+
+If you'd rather edit the YAML directly, copy the starter and remove the dimensions you
+don't need:
+
+```bash
+git clone https://github.com/GridGain-Demos/gridgain-demo-template
+cp -r gridgain-demo-template ../my-demo
+cd ../my-demo
+./rename-demo.sh my-demo com.example.mydemo
+
+cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
+$EDITOR src/main/resources/demo-config.yaml   # remove unused sections; fill <YOUR_*>
+
+./gradlew validateDemoConfiguration            # confirm schema + cross-element checks pass
+./gradlew tasks
+```
+
+The starter ships with one entry per supported (cloud × GG version × monitor) permutation
+— no A/B duplicates. Removing what you don't use is straightforward; the wizard automates
+exactly the same trim plus secret substitution, but the file is fully hand-editable.
 
 ## Adding the toolkit to an existing gradle project
 
 You can skip this section if you have chosen to use the template as a starting point of your project.
-Jump to [this section](#what's-in-here)
+Jump to [this section](#whats-in-here)
 
 Use this path if you already have a Gradle project (Kotlin DSL) and want to graft the GridGain
 demo toolkit onto it instead of starting from the template directory.
@@ -150,7 +187,7 @@ demo toolkit onto it instead of starting from the template directory.
 - A working `gradle/wrapper/` directory (`./gradlew`). Run `gradle wrapper` first if you don't
   have one.
 
-> The snippets below use plugin/UI version `0.0.5-SNAPSHOT`.
+> The snippets below use plugin/UI version `0.5.0-SNAPSHOT`.
 > Check the [plugin repo](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin) for
 > the current released version and update both the `id(...) version` and the matching
 > `implementation` / `runtimeOnly` coordinates in lock-step.
@@ -196,7 +233,7 @@ buildscript {
 
 plugins {
     java // or your existing language plugins
-    id("com.gridgain.demo.plugin") version "0.0.5-SNAPSHOT"
+    id("com.gridgain.demo.plugin") version "0.5.0-SNAPSHOT"
 }
 
 repositories {
@@ -233,9 +270,9 @@ the one you don't need** rather than hunt for the right coordinates.
 ```kotlin
 dependencies {
     implementation("org.yaml:snakeyaml:1.33")
-    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.0.5-SNAPSHOT")
-    // UI project — provides the Ktor server for the launchDemoUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.0.5-SNAPSHOT")
+    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.5.0-SNAPSHOT")
+    // UI project — provides the Ktor server for the launchPluginUi task
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.5.0-SNAPSHOT")
 
     // ---------------------------------------------------------------------------
     // GridGain 9 runtime — keep this block if your target cluster is GG9.
@@ -276,8 +313,8 @@ tasks.withType<JavaCompile> { options.encoding = "UTF-8" }
 // Wire validateRequirements into ./gradlew check
 tasks.named("check").configure { dependsOn("validateRequirements") }
 
-// Ensure launchDemoUi sees runtime-classpath changes (so the UI reloads)
-tasks.named("launchDemoUi") {
+// Ensure launchPluginUi sees runtime-classpath changes (so the UI reloads)
+tasks.named("launchPluginUi") {
     inputs.files(configurations.named("runtimeClasspath"))
 }
 
@@ -306,13 +343,34 @@ You can also pass `-PdemoConfigFile=...` on the command line to override per inv
 
 ### 7. Seed your demo config and update `.gitignore`
 
-Copy the starter template into your resources directory:
+Pull the starter into your resources directory:
 
 ```bash
 mkdir -p src/main/resources
-curl -fsSL https://raw.githubusercontent.com/GridGain-Demos/gridgain-demo-template/main/src/main/resources/demo-config.yaml.template \
-  -o src/main/resources/demo-config.yaml.template
-cp src/main/resources/demo-config.yaml.template src/main/resources/demo-config.yaml
+curl -fsSL https://raw.githubusercontent.com/GridGain-Demos/gridgain-demo-template/main/src/main/resources/demo-config.yaml.starter \
+  -o src/main/resources/demo-config.yaml.starter
+```
+
+Then either generate `demo-config.yaml` with the wizard:
+
+```bash
+./gradlew initDemoConfig \
+    -Pwizard.cloud=gke \
+    -Pwizard.ggVersion=9 \
+    -Pwizard.monitor=control-center \
+    -Pwizard.secret.gcp_account=you@example.com \
+    -Pwizard.secret.gcp_project=demo-project \
+    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json \
+    -Pwizard.secret.cc_license_file=controlcenter/controlcenter-license.xml \
+    -Pwizard.secret.cc_admin_email=admin@example.com \
+    -Pwizard.secret.cc_admin_password='<password>'
+```
+
+Or hand-edit the starter:
+
+```bash
+cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
+$EDITOR src/main/resources/demo-config.yaml   # remove unused sections; fill <YOUR_*>
 ```
 
 Add these entries to your existing `.gitignore` — `demo-config.yaml` and license files contain
@@ -328,19 +386,20 @@ environment-config.yaml
 **/**-license.json
 ```
 
-Keep `demo-config.yaml.template` tracked — it has only `<YOUR_...>` placeholders.
+Keep `demo-config.yaml.starter` tracked — it has only `<YOUR_...>` placeholders and serves as the wizard's input (and the hand-editor's starting point).
 
 ### 8. Verify
 
 ```bash
 ./gradlew tasks --group "GridGain Demo"
-./gradlew validateRequirements
-./gradlew launchDemoUi
+./gradlew validateDemoConfiguration
 ```
 
-If `tasks` lists `validateRequirements`, `launchDemoUi`, etc., the plugin is wired in
-correctly. Edit `src/main/resources/demo-config.yaml` (or use `launchDemoUi`) to fill in
-your account, licenses, namespaces, and infrastructure details.
+If `tasks` lists `initDemoConfig`, `validateDemoConfiguration`, `launchPluginUi`, etc.,
+the plugin is wired in correctly. Use `./gradlew initDemoConfig -Pwizard.cloud=… …` to
+generate a populated `demo-config.yaml`, or hand-edit a copy of
+`src/main/resources/demo-config.yaml.starter`. Then run `./gradlew launchPluginUi` to
+fine-tune via the UI.
 
 ## What's in here
 
@@ -349,8 +408,8 @@ your account, licenses, namespaces, and infrastructure details.
 | `settings.gradle.kts` | Sets `rootProject.name`; resolves the plugin and UI from GridGain Maven repos. |
 | `build.gradle.kts` | Applies `com.gridgain.demo.plugin`; depends on GridGain 9 runtime + the UI project. |
 | `gradle.properties` | Points the plugin at `src/main/resources/demo-config.yaml`. |
-| `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`; seeds `demo-config.yaml`. |
-| `src/main/resources/demo-config.yaml.template` | Starter configuration. Copy to `demo-config.yaml` and edit. |
+| `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`. Config-seeding moved to `./gradlew initDemoConfig`. |
+| `src/main/resources/demo-config.yaml.starter` | Hand-editable starter (and wizard input) — minimal-but-complete, no test scaffolding. |
 | `.gitignore` | Ignores `demo-config.yaml`, license files, build outputs, IDE files. |
 
 ## Manual rename (if you can't run the script)
@@ -369,7 +428,7 @@ The `dependencies` section of the `build.gradle.kts` file contains entries for b
 
 `demo-config.yaml` is **gitignored**. It will typically contain account emails,
 admin passwords, and cloud credentials, so it must never be committed. The
-tracked `demo-config.yaml.template` has only placeholders and is safe to commit.
+tracked `demo-config.yaml.starter` has only placeholders and is safe to commit.
 License files (`**/gridgain-license.json`, `**/controlcenter-license.json`) are
 also gitignored.
 
