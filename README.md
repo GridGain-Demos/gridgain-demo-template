@@ -133,61 +133,65 @@ Please do that before using the tool.
 
 ## Secrets
 
-Credentials that a demo needs — database passwords, a replication user, an ssh password for the `hosts`
+Credentials a demo needs — database passwords, a replication user, an ssh password for the `hosts`
 platform — live in a SOPS-encrypted file under `secrets/`, referenced by name from `demo-config.yaml`'s
 `secrets:` section. They are never written into `demo-config.yaml` itself.
 
-### Setup
+### The naming is the safety mechanism
+
+`.sops.` in a filename means encrypted. Always.
+
+| File | State | Git |
+|------|-------|-----|
+| `secrets/demo-secrets.yaml.example` | plaintext placeholders | committed |
+| `secrets/demo-secrets.yaml` | plaintext, yours | **gitignored** |
+| `secrets/demo-secrets.sops.yaml` | encrypted | committed |
+
+Because the two forms have **different names**, `.gitignore` can tell them apart and does the work:
+`secrets/*` is denied, and only `*.sops.yaml` and `*.yaml.example` are allowed back. A plaintext secrets
+file cannot be committed by accident, not even by `git add -A`.
+
+There is also a `.sops.yaml` at the repo root. That one is SOPS's **configuration** — it names the public
+key to encrypt to, and is safe to commit. It is not a secrets file. The similar names are SOPS's
+convention, not ours.
+
+### Setup — one command
 
 ```bash
 brew install sops age            # once per laptop
 ./scripts/bootstrap-secrets.sh   # once per repo; idempotent, safe to re-run
 ```
 
-That script creates an age key if you have none, derives your public key, writes `.sops.yaml`, copies the
-secrets example into place, and enables the pre-commit hook. Then edit
-`secrets/demo-secrets.sops.yaml`, replace every `-replace-me` value, and encrypt it:
+It creates an age key if you have none, writes `.sops.yaml` with your public key, and creates
+`secrets/demo-secrets.sops.yaml` by encrypting the example **directly** — so the real file is born
+encrypted and never exists as plaintext. That window is where credentials get left behind.
+
+### Editing values
+
+Preferred, because no plaintext ever reaches the disk:
 
 ```bash
-sops --encrypt --in-place secrets/demo-secrets.sops.yaml
+sops secrets/demo-secrets.sops.yaml     # opens $EDITOR, re-encrypts on save
 ```
 
-To change a value later, `sops secrets/demo-secrets.sops.yaml` opens your editor and re-encrypts on save.
+For bulk editing, if you would rather work in a plain file:
 
-### Two files, confusingly similar names
-
-Worth reading once, because conflating them is the usual failure:
-
-| File | What it is |
-|------|-----------|
-| `.sops.yaml` | **SOPS's own configuration**, at the repo root. Names the public key to encrypt *to*. Safe to commit — public keys only. |
-| `secrets/demo-secrets.sops.yaml` | A **data file** holding secrets. The `.sops.yaml` in its name is only a convention meaning "SOPS-encrypted". Unrelated to the file above. |
-
-Missing the first is the common mistake, and the error is unhelpful:
-
-```
-config file not found, or has no creation rules, and no keys provided through command line options
+```bash
+sops --decrypt secrets/demo-secrets.sops.yaml > secrets/demo-secrets.yaml   # gitignored
+$EDITOR secrets/demo-secrets.yaml
+./scripts/encrypt-secrets.sh            # re-encrypts, then removes the plaintext
 ```
 
-That is about a missing public **recipient**, and never mentions public keys. Note too that
-`SOPS_AGE_KEY_FILE` is for **decrypting** — setting it does not let SOPS encrypt.
-
-### Why `.gitignore` is not the safety net
-
-`secrets/demo-secrets.sops.yaml` has the same name whether or not it has been encrypted, so no path rule
-can distinguish the safe case from one that commits a credential into git history — where removing it means
-rewriting history, not deleting a file.
-
-`.githooks/pre-commit` is what protects you: it refuses to commit a `secrets/*.sops.yaml` with no `sops:`
-block. `bootstrap-secrets.sh` enables it. Do not skip that because everything appears to work without it —
-the failure is silent and permanent. To check a file at any time:
+Check state at any time:
 
 ```bash
 grep -q '^sops:' secrets/demo-secrets.sops.yaml && echo ENCRYPTED || echo PLAINTEXT
 ```
 
-An example file having no `sops:` block is correct: the block appears only after encryption. So "mine looks
-like the example" does not mean yours is encrypted.
+An example file having no `sops:` block is correct — the block appears only after encryption.
+
+`.githooks/pre-commit` remains as a second line of defence, for a file hand-made under the encrypted name.
+`bootstrap-secrets.sh` enables it.
 
 ## Starting a new project using the template
 
