@@ -40,3 +40,19 @@ work/
 **/*.parquet
 src/main/python/.ipynb*
 src/main/python/__pycache__*
+
+# --- Secrets -------------------------------------------------------------------
+#
+# A SOPS-encrypted secrets/*.sops.yaml IS safe to commit; a plaintext one is not. .gitignore cannot tell
+# them apart — the file has the same name either way — so what protects you is .githooks/pre-commit,
+# enabled by ./scripts/bootstrap-secrets.sh. These rules only cover names that are unambiguously
+# plaintext.
+secrets/*.plain.yaml
+secrets/*.plaintext.yaml
+secrets/*.decrypted.yaml
+secrets/demo-secrets.yaml
+
+# SOPS private keys must never be in the repo. The PUBLIC key in .sops.yaml is fine and is meant to be
+# committed.
+*.agekey
+keys.txt

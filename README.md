@@ -1,5 +1,7 @@
-> This is really the READ.me for your project. Once you have set up the project as described belwo, you should delete the following section, up to but not including the last paragragh. That section
-contains a link to this information (managed in another location) should you need it in the future.
+
+> This is really the READ.me for your project. Once you have set up the project as described below,
+> you should delete the following section, up to but not including the last paragragh. That section
+> contains a link to this information (managed in another location) should you need it in the future.
 
 # GridGain Demo Toolkit
 
@@ -128,6 +130,64 @@ Please do that before using the tool.
         Four packages will need this flip on first run: `demo-test-client-gg8`, `demo-test-client-gg9`, `gridgain-data-generator-gg8`, `gridgain-data-generator-gg9`. Subsequent pushes inherit the public visibility.
 
   GitHub Packages, GCP Artifact Registry, and any other publicly-readable / write-authenticated registry will also work — the wizard's form supports an `env-var token` mode (GHCR / Docker Hub / Quay) and a `GCP Artifact Registry via infrastructure_account` mode.
+
+## Secrets
+
+Credentials that a demo needs — database passwords, a replication user, an ssh password for the `hosts`
+platform — live in a SOPS-encrypted file under `secrets/`, referenced by name from `demo-config.yaml`'s
+`secrets:` section. They are never written into `demo-config.yaml` itself.
+
+### Setup
+
+```bash
+brew install sops age            # once per laptop
+./scripts/bootstrap-secrets.sh   # once per repo; idempotent, safe to re-run
+```
+
+That script creates an age key if you have none, derives your public key, writes `.sops.yaml`, copies the
+secrets example into place, and enables the pre-commit hook. Then edit
+`secrets/demo-secrets.sops.yaml`, replace every `-replace-me` value, and encrypt it:
+
+```bash
+sops --encrypt --in-place secrets/demo-secrets.sops.yaml
+```
+
+To change a value later, `sops secrets/demo-secrets.sops.yaml` opens your editor and re-encrypts on save.
+
+### Two files, confusingly similar names
+
+Worth reading once, because conflating them is the usual failure:
+
+| File | What it is |
+|------|-----------|
+| `.sops.yaml` | **SOPS's own configuration**, at the repo root. Names the public key to encrypt *to*. Safe to commit — public keys only. |
+| `secrets/demo-secrets.sops.yaml` | A **data file** holding secrets. The `.sops.yaml` in its name is only a convention meaning "SOPS-encrypted". Unrelated to the file above. |
+
+Missing the first is the common mistake, and the error is unhelpful:
+
+```
+config file not found, or has no creation rules, and no keys provided through command line options
+```
+
+That is about a missing public **recipient**, and never mentions public keys. Note too that
+`SOPS_AGE_KEY_FILE` is for **decrypting** — setting it does not let SOPS encrypt.
+
+### Why `.gitignore` is not the safety net
+
+`secrets/demo-secrets.sops.yaml` has the same name whether or not it has been encrypted, so no path rule
+can distinguish the safe case from one that commits a credential into git history — where removing it means
+rewriting history, not deleting a file.
+
+`.githooks/pre-commit` is what protects you: it refuses to commit a `secrets/*.sops.yaml` with no `sops:`
+block. `bootstrap-secrets.sh` enables it. Do not skip that because everything appears to work without it —
+the failure is silent and permanent. To check a file at any time:
+
+```bash
+grep -q '^sops:' secrets/demo-secrets.sops.yaml && echo ENCRYPTED || echo PLAINTEXT
+```
+
+An example file having no `sops:` block is correct: the block appears only after encryption. So "mine looks
+like the example" does not mean yours is encrypted.
 
 ## Starting a new project using the template
 
@@ -462,21 +522,13 @@ The `dependencies` section of the `build.gradle.kts` file contains entries for b
 admin passwords, and cloud credentials, so it must never be committed. The
 tracked `demo-config.yaml.starter` has only placeholders and is safe to commit.
 License files (`**/gridgain-license.json`, `**/controlcenter-license.json`) are
-also gitignored.
-
-## Further reading
-
-See the [plugin's own documentation](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin)
-for the full list of tasks, configuration schema, and processing-pipeline details.
-
-
-> It is recommended that you delete everything above this section and replace it with the READ.me contents of your demo.
-> Leave the section below for its links back to the plugin project.
+also git ignored.
 
 ## gridgain-demo-template
 This project was created using the [gridgain-demo-template](https://github.com/GridGain-Demos/gridgain-demo-template)
-Information on installing and using the plugin may be found in it's
-[READ.me](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin)
+
+For information about the plugin and its associated projects, please see the [plugin's own documentation](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin)
+for the full list of requirements, tasks, configuration schema, and processing-pipeline details.
 
 
 
