@@ -134,7 +134,7 @@ Please do that before using the tool.
 ## Secrets
 
 Credentials a demo needs — database passwords, a replication user, an ssh password for the `hosts`
-platform — live in a SOPS-encrypted file under `secrets/`, referenced by name from `demo-config.yaml`'s
+platform — live in a SOPS-encrypted file under `src/main/resources/secrets/`, referenced by name from `demo-config.yaml`'s
 `secrets:` section. They are never written into `demo-config.yaml` itself.
 
 ### The naming is the safety mechanism
@@ -143,12 +143,12 @@ platform — live in a SOPS-encrypted file under `secrets/`, referenced by name 
 
 | File | State | Git |
 |------|-------|-----|
-| `secrets/demo-secrets.yaml.example` | plaintext placeholders | committed |
-| `secrets/demo-secrets.yaml` | plaintext, yours | **gitignored** |
-| `secrets/demo-secrets.sops.yaml` | encrypted | committed |
+| `src/main/resources/secrets/demo-secrets.yaml.example` | plaintext placeholders | committed |
+| `src/main/resources/secrets/demo-secrets.yaml` | plaintext, yours | **gitignored** |
+| `src/main/resources/secrets/demo-secrets.sops.yaml` | encrypted | committed |
 
 Because the two forms have **different names**, `.gitignore` can tell them apart and does the work:
-`secrets/*` is denied, and only `*.sops.yaml` and `*.yaml.example` are allowed back. A plaintext secrets
+`src/main/resources/secrets/*` is denied, and only `*.sops.yaml` and `*.yaml.example` are allowed back. A plaintext secrets
 file cannot be committed by accident, not even by `git add -A`.
 
 There is also a `.sops.yaml` at the repo root. That one is SOPS's **configuration** — it names the public
@@ -163,7 +163,7 @@ brew install sops age            # once per laptop
 ```
 
 It creates an age key if you have none, writes `.sops.yaml` with your public key, and creates
-`secrets/demo-secrets.sops.yaml` by encrypting the example **directly** — so the real file is born
+`src/main/resources/secrets/demo-secrets.sops.yaml` by encrypting the example **directly** — so the real file is born
 encrypted and never exists as plaintext. That window is where credentials get left behind.
 
 ### Editing values
@@ -171,21 +171,21 @@ encrypted and never exists as plaintext. That window is where credentials get le
 Preferred, because no plaintext ever reaches the disk:
 
 ```bash
-sops secrets/demo-secrets.sops.yaml     # opens $EDITOR, re-encrypts on save
+sops src/main/resources/secrets/demo-secrets.sops.yaml     # opens $EDITOR, re-encrypts on save
 ```
 
 For bulk editing, if you would rather work in a plain file:
 
 ```bash
-sops --decrypt secrets/demo-secrets.sops.yaml > secrets/demo-secrets.yaml   # gitignored
-$EDITOR secrets/demo-secrets.yaml
+sops --decrypt src/main/resources/secrets/demo-secrets.sops.yaml > src/main/resources/secrets/demo-secrets.yaml   # gitignored
+$EDITOR src/main/resources/secrets/demo-secrets.yaml
 ./scripts/encrypt-secrets.sh            # re-encrypts, then removes the plaintext
 ```
 
 Check state at any time:
 
 ```bash
-grep -q '^sops:' secrets/demo-secrets.sops.yaml && echo ENCRYPTED || echo PLAINTEXT
+grep -q '^sops:' src/main/resources/secrets/demo-secrets.sops.yaml && echo ENCRYPTED || echo PLAINTEXT
 ```
 
 An example file having no `sops:` block is correct — the block appears only after encryption.
