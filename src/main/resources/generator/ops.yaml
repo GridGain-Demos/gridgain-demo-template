@@ -1,0 +1,131 @@
+# Data-generator scenarios for this demo — the load profiles it can run.
+#
+# This file ships as a working example. It is valid as it stands, and the `example-load` scenario
+# below will run once its `root_schemas` names a schema your data.yaml defines (the shipped
+# `customer` schema already satisfies that). Edit it in place, or edit it through the demo UI's
+# Scenarios page — that page preserves these comments through its writes, so anything you record
+# here about WHY a scenario looks the way it does survives.
+#
+# Paired with data.yaml in this same directory. The two are always selected and run together: a
+# scenario's `root_schemas` name schemas defined there, and the generator's CLI requires both. Keep
+# them side by side under these names.
+#
+# The demo UI looks for this exact path — src/main/resources/generator/ops.yaml under the demo
+# project root — when it starts, so a pair left here is picked up with no selection needed.
+schema_version: 7
+
+# ── Scenarios ────────────────────────────────────────────────────────────────────────────────────
+#
+# WHICH CLUSTER a run writes to is deliberately NOT declared here. It is chosen at launch: the UI's
+# Load page has a target selector, and the generator CLI takes --targetCluster. Schema v7 removed the
+# old top-level `targets:` block and the per-scenario `target:` key for exactly that reason — one
+# scenarios file can drive any cluster in the demo, so you do not need a near-duplicate scenario per
+# cluster. (If you are migrating an older file by hand, deleting those two things is the whole
+# change; the generator will otherwise do it for you on first run, but it rewrites the file through
+# its YAML writer and drops every comment.)
+scenarios:
+  - name: example-load
+    # Schemas defined in data.yaml beside this file. `customer` is the one shipped there — if you
+    # rename it, rename it in both files, or the pair fails validation before the run starts.
+    root_schemas: [customer]
+
+    # How fast. Three kinds:
+    #   constant  ops_per_second
+    #   ramped    from, to, over ("2m")
+    #   stepped   steps: [{ rate, hold }, ...]
+    # The UI's Load page can override this live while a run is in flight, if the `control:` block at
+    # the bottom of this file is switched on.
+    rate: { kind: constant, ops_per_second: 50 }
+
+    # How long. Three kinds:
+    #   count                 value: an integer number of operations
+    #   time                  value: a duration string ("5m")
+    #   until_stop_condition  runs until a `stop_conditions:` entry fires
+    # A bounded count is a good default for a first run: it finishes on its own.
+    duration: { kind: count, value: 1000 }
+
+    # Whether the generator creates the tables it writes to.
+    #   skip   assume they already exist (the schema's default)
+    #   apply  create them first
+    #   emit   write the DDL out without running it
+    # CHANGE THIS TO `apply` for a first run against a fresh cluster — with `skip`, a run against a
+    # cluster that has never seen this schema fails on the first write.
+    provisioning: skip
+
+    # Share of operations that read rather than write, 0.0 to 1.0.
+    read_ratio: 0.10
+
+    # Optional: spread the scenario over several generator instances. Absent means a single instance.
+    # `partition_count` must be at least `replicas`. Only meaningful for an in-cluster (Kubernetes)
+    # run — a generator installed on a host is one JVM under systemd, with no second replica to
+    # partition work across.
+    #distribution: { replicas: 2, partition_count: 2 }
+
+    # Optional: end the run early when the system under test stops keeping up. Kinds are
+    # latency_p99_above / latency_p999_above (threshold: a duration string), error_rate_above
+    # (threshold: 0.0-1.0) and external_signal.
+    #stop_conditions:
+    #  - { kind: latency_p99_above, threshold: "250ms" }
+
+# ── OpenTelemetry ────────────────────────────────────────────────────────────────────────────────
+#
+# The generator's export of its own instruments: in-flight operations, operation duration histogram,
+# errors, target rate and observed rate. `none` is the schema's default and what ships here, because
+# no collector is assumed to exist.
+#
+# TO SWITCH ON: set `exporter: otlp` and add an `endpoint:`. Point it at a collector reachable from
+# wherever the GENERATOR runs — see the vantage-point note below, which applies here too.
+#
+# MIND THE PORT. The generator's OTLP exporter is HTTP-based, so it needs a collector's OTLP/HTTP
+# receiver, conventionally 4318. Pointing it at the gRPC receiver (4317) makes the collector reset
+# the connection and every export fail. GridGain clusters exporting to the same collector often use
+# the gRPC port, so the two addresses in your demo may legitimately differ only by port number.
+otel:
+  exporter: none
+  #endpoint: http://<YOUR_OTEL_COLLECTOR_HOST>:4318
+
+# ── Optional: the demo UI's Load page ────────────────────────────────────────────────────────────
+#
+# Both blocks below are commented out because each requires a Kafka broker address that is specific
+# to your demo, and the generator's schema requires the key once the block is present — so there is
+# nothing sensible to ship filled in. Uncomment a block and set `kafka_bootstrap` to switch it on.
+# Leave them commented and everything else works; the Load page simply reports itself unconfigured.
+#
+# THE VANTAGE-POINT RULE, which is the thing that most often goes wrong here:
+#
+# `kafka_bootstrap` below is resolved from the GENERATOR's point of view — cluster-internal broker
+# DNS for a run inside Kubernetes, a routable host:port for a run on a VM or a laptop. The UI reads
+# its own separate setting, `uiKafkaBootstrap` in gradle.properties, resolved from the machine
+# running the UI. These are two different questions and often two different answers. Do not copy one
+# into the other on the assumption that they match; they are equal only when the broker happens to be
+# reachable at the same address from both places.
+
+# Live throughput and latency export. This is what the Load page graphs — without it the page has
+# nothing to read.
+#metrics:
+#  kafka_bootstrap: "<YOUR_BROKER_HOST>:9092"
+#  topic: "datagen-metrics"
+#  interval_ms: 1000
+#  # Whole-run latency histogram, published on the same topic as the interval figures. The UI merges
+#  # the per-instance histograms into fleet percentiles, because percentiles do not compose — the
+#  # highest p99 across instances is the worst instance's p99, not the fleet's.
+#  #
+#  # 60000ms is the recommended ceiling: an operation slower than a minute is pathological for a load
+#  # test, and one past the ceiling is clamped to it rather than dropped, so a p99 sitting exactly at
+#  # 60000 reads as "slower than we can measure" instead of silently vanishing.
+#  histogram_highest_ms: 60000
+#  # HdrHistogram precision in significant digits. 3 is the standard 0.1% precision. The range is
+#  # 1-4, capped at 4 because each extra digit costs roughly 100x more histogram memory per tick —
+#  # 3 digits is about 280KB/sec per instance, 5 would have been ~21MB/sec. The ceiling above is
+#  # nearly free by comparison, since memory is logarithmic in it.
+#  histogram_significant_digits: 3
+
+# Runtime rate control: the topic the generator consumes rate commands from, which is what the Load
+# page's rate slider publishes to. Every generator instance consumes it under its own group id, so
+# one command reaches the whole fleet at once.
+#
+# Note for the first few seconds of a run: a rate command sent before the generator has subscribed
+# is accepted by the UI and has no effect. Give a run a moment to start before moving the slider.
+#control:
+#  kafka_bootstrap: "<YOUR_BROKER_HOST>:9092"
+#  topic: "datagen-control"

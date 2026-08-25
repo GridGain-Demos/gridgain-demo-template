@@ -506,7 +506,27 @@ fine-tune via the UI.
 | `gradle.properties` | Points the plugin at `src/main/resources/demo-config.yaml`. |
 | `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`. Config-seeding moved to `./gradlew initDemoConfig`. |
 | `src/main/resources/demo-config.yaml.starter` | Hand-editable starter (and wizard input) — minimal-but-complete, no test scaffolding. |
+| `src/main/resources/generator/ops.yaml` | Data-generator scenarios: one worked example load profile. The path the UI looks at on startup. |
+| `src/main/resources/generator/data.yaml` | The data schemas those scenarios generate against. Always paired with the `ops.yaml` beside it. |
 | `.gitignore` | Ignores `demo-config.yaml`, license files, build outputs, IDE files. |
+
+### The data generator's scenarios file
+
+`src/main/resources/generator/{ops,data}.yaml` ship as a tracked, working pair — unlike
+`demo-config.yaml`, they hold no credentials, so they are committed rather than gitignored. The demo
+UI reads that exact path when it starts, so the Scenarios page and the Load page have something to
+show in a fresh clone. Both files are commented throughout; the two things you are most likely to
+change are:
+
+- **`provisioning:`** on the example scenario — set it to `apply` for a first run against a cluster
+  that has never seen the schema, so the generator creates the tables before writing to them.
+- **the `metrics:` and `control:` blocks** at the bottom of `ops.yaml`, which are commented out.
+  Uncomment them and set `kafka_bootstrap` to drive the generator's rate live from the UI's Load
+  page. That address is resolved from the *generator's* vantage point and is deliberately separate
+  from `uiKafkaBootstrap` in `gradle.properties`, which is resolved from the machine running the UI.
+
+Which cluster a run writes to is **not** in these files — it is chosen at launch, from the Load
+page's target selector or `--targetCluster` on the generator CLI.
 
 ## Manual rename (if you can't run the script)
 Again, the gradle project name is only important if you plan on publishing your project as maven artifacts or zip files.

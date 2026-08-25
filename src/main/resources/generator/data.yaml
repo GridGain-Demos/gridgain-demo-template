@@ -1,0 +1,50 @@
+# Data schemas the scenarios in ops.yaml generate against.
+#
+# Paired with ops.yaml in this same directory — the two are always selected and run together. A
+# scenario's `root_schemas` names entries from this file, so every name here is part of that file's
+# vocabulary: rename one and you must rename it there too.
+#
+# This ships deliberately small: one schema, a key column and one value column, enough to make the
+# example scenario in ops.yaml run against a cluster. Grow it into the shape of your own demo's data.
+schema_version: 2
+
+schemas:
+  # Named by `root_schemas: [customer]` in ops.yaml. Rename both together.
+  - name: customer
+    # Share of generated operations that update an existing row rather than insert a new one. The
+    # scenario's `read_ratio` decides reads vs. writes; this decides what a write does.
+    update_ratio: 0.10
+    columns:
+      # `key: true` marks the primary key. `affinity: true` names the column rows are co-located by,
+      # which is what keeps related rows on the same node — set it on the key of the root schema, and
+      # on the foreign key of anything you want stored alongside its parent.
+      - name: id
+        null_rate: 0.0
+        key: true
+        affinity: true
+        value_source: { kind: sequence, start: 1, step: 1 }
+
+      # Datafaker expressions generate realistic values; the full expression vocabulary is
+      # Datafaker's own. `null_rate` is the share of generated rows where this column is left null,
+      # which is how you exercise a demo's null handling on purpose.
+      - name: name
+        null_rate: 0.0
+        value_source: { kind: datafaker, expression: "#{name.fullName}" }
+
+      # More value_source kinds, for when one column is not enough:
+      #   sequence         start, step — monotonic integers, the usual choice for a synthetic key
+      #   datafaker        expression — realistic values
+      #   unique           expression — as datafaker, but retried until the value has not been used
+      #   weighted-choice  choices: [{ value, weight }, ...] — a skewed categorical distribution
+      #   yaml-data        path, key — values drawn from a YAML file you supply
+      #   parent-fk-ref    parent_schema, parent_column, cohort_buckets — a foreign key into another
+      #                    schema, with cohort_buckets shaping how unevenly parents are referenced
+      #   key-suffix       base_column, separator, length — a key derived from another column
+      #
+      #- name: segment
+      #  null_rate: 0.0
+      #  value_source:
+      #    kind: weighted-choice
+      #    choices:
+      #      - { value: standard, weight: 0.8 }
+      #      - { value: premium, weight: 0.2 }
