@@ -89,15 +89,13 @@ Done.
 Next steps:
   1. Rename the containing directory to '${NEW_NAME}' if you haven't already:
        cd .. && mv "$(basename "$SCRIPT_DIR")" "${NEW_NAME}"
-  2. Generate src/main/resources/demo-config.yaml using the wizard:
+  2. Generate src/main/resources/demo-config.yaml. Pass the four choices and the task
+     will tell you every remaining value it needs, all at once:
        ./gradlew initDemoConfig \\
-           -Pwizard.cloud=gke[,eks] \\
+           -Pwizard.platform=gke[,eks,hosts] \\
            -Pwizard.ggVersion=9[,8] \\
-           -Pwizard.monitor=control-center \\
-           -Pwizard.secret.gcp_account=<value> ...
-     Or hand-edit:
-       cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
-       \$EDITOR src/main/resources/demo-config.yaml
+           -Pwizard.monitor=none[,control-center] \\
+           -Pwizard.derivedImages=public[,skip,build-and-push]
   3. Initialize git if you want a fresh history:
        rm -rf .git && git init && git add . && git commit -m "Initial commit from gridgain-demo-template"
   4. List available tasks:

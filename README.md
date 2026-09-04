@@ -216,22 +216,36 @@ cd ../my-demo
 #    sets rootProject.name (and optionally group). It no longer seeds demo-config.yaml.
 ./rename-demo.sh my-demo com.example.mydemo
 
-# 3. Generate src/main/resources/demo-config.yaml using the wizard.
-#    The wizard prunes sections you don't need (per cloud / GG version / monitor choice)
-#    and substitutes <YOUR_*> placeholders with the values you supply.
-#    Pick the dimensions and secrets that apply to you:
+# 3. Generate src/main/resources/demo-config.yaml.
+#    The configuration is built from the answers you give — nothing is pruned from a
+#    template and there are no placeholders left to substitute. The result is annotated
+#    with what each entry is for, so it is worth reading before you change it.
+#
+#    You do not have to know which properties to pass. Give the four choices below and
+#    the task reports every remaining value it needs, all of them at once, each with the
+#    property that supplies it and why it is asked rather than assumed.
 ./gradlew initDemoConfig \
-    -Pwizard.cloud=gke \
+    -Pwizard.platform=gke \
     -Pwizard.ggVersion=9 \
-    -Pwizard.monitor=control-center \
+    -Pwizard.monitor=none \
+    -Pwizard.derivedImages=public \
+    -Pwizard.region=us-west1 \
+    -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
     -Pwizard.secret.gcp_project=demo-project \
-    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json \
-    -Pwizard.secret.cc_license_file=controlcenter/controlcenter-license.xml \
-    -Pwizard.secret.cc_admin_email=admin@example.com \
-    -Pwizard.secret.cc_admin_password='<password>'
-# A missing-secret error lists every -Pwizard.secret.* property required for your
-# chosen dimensions, so you can correct in one re-run.
+    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json
+#
+# The four choices, and what each costs you:
+#   -Pwizard.platform       gke, eks or hosts (comma-separate for more than one)
+#   -Pwizard.ggVersion      8 or 9
+#   -Pwizard.monitor        control-center, or none. A cluster deploys and serves traffic
+#                           without one; control-center additionally needs
+#                           -Pwizard.secret.cc_license_file, cc_admin_email and
+#                           cc_admin_password.
+#   -Pwizard.derivedImages  public pulls the published test-client and data-generator
+#                           images and needs nothing else. skip is also fine — it costs
+#                           only connectTestClient and dataGenerate. build-and-push needs
+#                           Docker, a registry you can write to, and source checkouts.
 
 # 4. Verify the wizard's output and the plugin wiring.
 ./gradlew validateDemoConfiguration
@@ -246,27 +260,16 @@ rm -rf .git && rm .gitignore
 ./gradlew launchPluginUi
 ```
 
-### Alternate path — hand-edit the starter (no wizard)
+### Editing the configuration by hand
 
-If you'd rather edit the YAML directly, copy the starter and remove the dimensions you
-don't need:
+`initDemoConfig` is the way to *create* the file; editing it afterwards is expected and safe. The
+output is commented throughout, and `./gradlew launchPluginUi` gives you a form-driven editor over
+the same document if you prefer that to YAML.
 
-```bash
-git clone https://github.com/GridGain-Demos/gridgain-demo-template
-cp -r gridgain-demo-template ../my-demo
-cd ../my-demo
-./rename-demo.sh my-demo com.example.mydemo
-
-cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
-$EDITOR src/main/resources/demo-config.yaml   # remove unused sections; fill <YOUR_*>
-
-./gradlew validateDemoConfiguration            # confirm schema + cross-element checks pass
-./gradlew tasks
-```
-
-The starter ships with one entry per supported (cloud × GG version × monitor) permutation
-— no A/B duplicates. Removing what you don't use is straightforward; the wizard automates
-exactly the same trim plus secret substitution, but the file is fully hand-editable.
+Do **not** start from `src/main/resources/demo-config.yaml.starter`. It is kept only as a reference
+for what a fully populated document looks like, and it is out of date: it declares
+`schema_version: 4` against a current 21 and is missing two sections the schema requires, so
+copying it produces a file `validateDemoConfiguration` rejects. It will be removed.
 
 ## Adding the toolkit to an existing gradle project
 
@@ -439,35 +442,29 @@ You can also pass `-PdemoConfigFile=...` on the command line to override per inv
 
 ### 7. Seed your demo config and update `.gitignore`
 
-Pull the starter into your resources directory:
+There is nothing to download. `initDemoConfig` builds the configuration from your answers:
 
 ```bash
 mkdir -p src/main/resources
-curl -fsSL https://raw.githubusercontent.com/GridGain-Demos/gridgain-demo-template/main/src/main/resources/demo-config.yaml.starter \
-  -o src/main/resources/demo-config.yaml.starter
-```
-
-Then either generate `demo-config.yaml` with the wizard:
-
-```bash
 ./gradlew initDemoConfig \
-    -Pwizard.cloud=gke \
+    -Pwizard.platform=gke \
     -Pwizard.ggVersion=9 \
-    -Pwizard.monitor=control-center \
+    -Pwizard.monitor=none \
+    -Pwizard.derivedImages=public \
+    -Pwizard.region=us-west1 \
+    -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
     -Pwizard.secret.gcp_project=demo-project \
-    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json \
-    -Pwizard.secret.cc_license_file=controlcenter/controlcenter-license.xml \
-    -Pwizard.secret.cc_admin_email=admin@example.com \
-    -Pwizard.secret.cc_admin_password='<password>'
+    -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json
 ```
 
-Or hand-edit the starter:
+Pass just the four choices — `platform`, `ggVersion`, `monitor`, `derivedImages` — and the task
+reports every remaining value it needs in one go, each with the property that supplies it and why
+it is asked rather than assumed. See step 3 of the Quick Start above for what each choice costs
+you.
 
-```bash
-cp src/main/resources/demo-config.yaml.starter src/main/resources/demo-config.yaml
-$EDITOR src/main/resources/demo-config.yaml   # remove unused sections; fill <YOUR_*>
-```
+The output is annotated with what each entry is for, and the task will not overwrite a
+configuration that already exists.
 
 Add these entries to your existing `.gitignore` — `demo-config.yaml` and license files contain
 secrets and must never be committed:
@@ -482,7 +479,9 @@ environment-config.yaml
 **/**-license.json
 ```
 
-Keep `demo-config.yaml.starter` tracked — it has only `<YOUR_...>` placeholders and serves as the wizard's input (and the hand-editor's starting point).
+`demo-config.yaml.starter` holds only `<YOUR_...>` placeholders, so it is safe to commit, but it is
+not an input to anything — `initDemoConfig` builds the configuration from your answers and reads no
+starter. It is a stale reference document and will be removed.
 
 ### 8. Verify
 
@@ -492,10 +491,9 @@ Keep `demo-config.yaml.starter` tracked — it has only `<YOUR_...>` placeholder
 ```
 
 If `tasks` lists `initDemoConfig`, `validateDemoConfiguration`, `launchPluginUi`, etc.,
-the plugin is wired in correctly. Use `./gradlew initDemoConfig -Pwizard.cloud=… …` to
-generate a populated `demo-config.yaml`, or hand-edit a copy of
-`src/main/resources/demo-config.yaml.starter`. Then run `./gradlew launchPluginUi` to
-fine-tune via the UI.
+the plugin is wired in correctly. Use `./gradlew initDemoConfig -Pwizard.platform=… …` to
+generate a populated `demo-config.yaml` — pass the four choices and it will tell you every other
+value it needs. Then run `./gradlew launchPluginUi` to fine-tune via the UI.
 
 ## What's in here
 
@@ -505,7 +503,7 @@ fine-tune via the UI.
 | `build.gradle.kts` | Applies `com.gridgain.demo.plugin`; depends on GridGain 9 runtime + the UI project. |
 | `gradle.properties` | Points the plugin at `src/main/resources/demo-config.yaml`. |
 | `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`. Config-seeding moved to `./gradlew initDemoConfig`. |
-| `src/main/resources/demo-config.yaml.starter` | Hand-editable starter (and wizard input) — minimal-but-complete, no test scaffolding. |
+| `src/main/resources/demo-config.yaml.starter` | Stale reference only — schema 4 against a current 21, missing required sections. Not an input; use `initDemoConfig`. To be removed. |
 | `src/main/resources/generator/ops.yaml` | Data-generator scenarios: one worked example load profile. The path the UI looks at on startup. |
 | `src/main/resources/generator/data.yaml` | The data schemas those scenarios generate against. Always paired with the `ops.yaml` beside it. |
 | `.gitignore` | Ignores `demo-config.yaml`, license files, build outputs, IDE files. |
@@ -544,7 +542,8 @@ The `dependencies` section of the `build.gradle.kts` file contains entries for b
 
 `demo-config.yaml` is **gitignored**. It will typically contain account emails,
 admin passwords, and cloud credentials, so it must never be committed. The
-tracked `demo-config.yaml.starter` has only placeholders and is safe to commit.
+tracked `demo-config.yaml.starter` has only placeholders and is safe to commit, though it is a
+stale reference rather than something to copy.
 License files (`**/gridgain-license.json`, `**/controlcenter-license.json`) are
 also git ignored.
 
