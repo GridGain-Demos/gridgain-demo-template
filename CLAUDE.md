@@ -43,7 +43,6 @@ they also auto-load from each repo's `.claude/skills/`.
 | File | Purpose |
 |------|---------|
 | `gradle.properties` | Points plugin at `src/main/resources/demo-config.yaml` |
-| `demo-config.yaml.template` | Tracked starter config with `<YOUR_...>` placeholders |
 | `demo-config.yaml` | User's actual config (gitignored, contains secrets) |
 
 ## Rules

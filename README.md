@@ -266,11 +266,6 @@ rm -rf .git && rm .gitignore
 output is commented throughout, and `./gradlew launchPluginUi` gives you a form-driven editor over
 the same document if you prefer that to YAML.
 
-Do **not** start from `src/main/resources/demo-config.yaml.starter`. It is kept only as a reference
-for what a fully populated document looks like, and it is out of date: it declares
-`schema_version: 4` against a current 21 and is missing two sections the schema requires, so
-copying it produces a file `validateDemoConfiguration` rejects. It will be removed.
-
 ## Adding the toolkit to an existing gradle project
 
 You can skip this section if you have chosen to use the template as a starting point of your project.
@@ -286,7 +281,7 @@ demo toolkit onto it instead of starting from the template directory.
 - A working `gradle/wrapper/` directory (`./gradlew`). Run `gradle wrapper` first if you don't
   have one.
 
-> The snippets below use plugin/UI version `0.5.0-SNAPSHOT`.
+> The snippets below use plugin/UI version `0.7.0-SNAPSHOT`.
 > Check the [plugin repo](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin) for
 > the current released version and update both the `id(...) version` and the matching
 > `implementation` / `runtimeOnly` coordinates in lock-step.
@@ -332,7 +327,7 @@ buildscript {
 
 plugins {
     java // or your existing language plugins
-    id("com.gridgain.demo.plugin") version "0.5.0-SNAPSHOT"
+    id("com.gridgain.demo.plugin") version "0.7.0-SNAPSHOT"
 }
 
 repositories {
@@ -369,9 +364,9 @@ the one you don't need** rather than hunt for the right coordinates.
 ```kotlin
 dependencies {
     implementation("org.yaml:snakeyaml:1.33")
-    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.5.0-SNAPSHOT")
+    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.7.0-SNAPSHOT")
     // UI project — provides the Ktor server for the launchPluginUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.5.0-SNAPSHOT")
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.7.0-SNAPSHOT")
 
     // ---------------------------------------------------------------------------
     // GridGain 9 runtime — keep this block if your target cluster is GG9.
@@ -479,10 +474,6 @@ environment-config.yaml
 **/**-license.json
 ```
 
-`demo-config.yaml.starter` holds only `<YOUR_...>` placeholders, so it is safe to commit, but it is
-not an input to anything — `initDemoConfig` builds the configuration from your answers and reads no
-starter. It is a stale reference document and will be removed.
-
 ### 8. Verify
 
 ```bash
@@ -503,7 +494,6 @@ value it needs. Then run `./gradlew launchPluginUi` to fine-tune via the UI.
 | `build.gradle.kts` | Applies `com.gridgain.demo.plugin`; depends on GridGain 9 runtime + the UI project. |
 | `gradle.properties` | Points the plugin at `src/main/resources/demo-config.yaml`. |
 | `rename-demo.sh` | Updates `rootProject.name` and (optionally) `group`. Config-seeding moved to `./gradlew initDemoConfig`. |
-| `src/main/resources/demo-config.yaml.starter` | Stale reference only — schema 4 against a current 21, missing required sections. Not an input; use `initDemoConfig`. To be removed. |
 | `src/main/resources/generator/ops.yaml` | Data-generator scenarios: one worked example load profile. The path the UI looks at on startup. |
 | `src/main/resources/generator/data.yaml` | The data schemas those scenarios generate against. Always paired with the `ops.yaml` beside it. |
 | `.gitignore` | Ignores `demo-config.yaml`, license files, build outputs, IDE files. |
@@ -541,11 +531,9 @@ The `dependencies` section of the `build.gradle.kts` file contains entries for b
 ## Secrets handling
 
 `demo-config.yaml` is **gitignored**. It will typically contain account emails,
-admin passwords, and cloud credentials, so it must never be committed. The
-tracked `demo-config.yaml.starter` has only placeholders and is safe to commit, though it is a
-stale reference rather than something to copy.
-License files (`**/gridgain-license.json`, `**/controlcenter-license.json`) are
-also git ignored.
+admin passwords, and cloud credentials, so it must never be committed — and neither may a backup or
+a dated snapshot of one, which is why `.gitignore` names those shapes too. Licence files are
+ignored in every form the vendor issues them: `**/*-license.json` and `**/*-license.xml`.
 
 ## gridgain-demo-template
 This project was created using the [gridgain-demo-template](https://github.com/GridGain-Demos/gridgain-demo-template)

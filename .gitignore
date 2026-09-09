@@ -72,3 +72,18 @@ src/main/resources/secrets/*
 # committed.
 *.agekey
 keys.txt
+
+# Backups and snapshots of a demo config are still a demo config: they carry the same credentials
+# the original does. The rules below name the shapes that slip past `demo-config.yaml` itself — a
+# `.backup`, a dated snapshot, a hand-made `-old` — because `git add -A` then sweeps one in. Ported
+# from the target-demo workspace, where exactly that happened.
+demo-config*.backup
+demo-config*-backup*
+demo-config*.bak
+
+# Claude Code's accumulated tool-permission allowlists. Per-machine session state: they grow an
+# entry per approved command and are full of absolute paths from whoever ran them, so they are not
+# project configuration anyone else can use. Named individually rather than ignoring `.claude/`
+# wholesale, so a skill added under `.claude/skills/` is still trackable.
+.claude/settings.json
+.claude/settings.local.json

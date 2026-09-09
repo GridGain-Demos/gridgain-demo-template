@@ -49,6 +49,14 @@ dependencies {
     // Explicitly add standard SnakeYAML to override any Android variants
     implementation("org.yaml:snakeyaml:1.33")
     implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.7.0-SNAPSHOT")
+    // Data-generator runtimes, one per GridGain generation, resolved by the dataGenerate task to
+    // build the forked JVM's classpath. Both are declared even for a demo running one generation:
+    // the task picks by the target cluster's version, and a missing coordinate surfaces as a
+    // ClassNotFoundException at the moment of use rather than at configuration time. They are kept
+    // off `implementation` deliberately — this project's own classpath carries GG9 ignite-core, and
+    // the same class names from two GridGain versions cannot share a classloader.
+    "dataGeneratorGg8Runtime"("com.gridgain.demo:gridgain-demo-data-generator-gg8:0.7.0-SNAPSHOT")
+    "dataGeneratorGg9Runtime"("com.gridgain.demo:gridgain-demo-data-generator-gg9:0.7.0-SNAPSHOT")
     // UI project — provides the Ktor server for launchPluginUi task
     runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.7.0-SNAPSHOT")
     implementation("org.gridgain:ignite-core:9.1.3")
