@@ -5,6 +5,11 @@
 
 # GridGain Demo Toolkit
 
+**In a hurry, or setting up for the first time? Start with [QUICKSTART.md](QUICKSTART.md).** It is
+the short path — what to install, how to start the wizard, and the cloud permissions to request
+before you begin, since those have a lead time and are the usual reason a first attempt stalls.
+This file is the reference for everything after that.
+
 The GridGain Demo Toolkit is a set of tools for deploying GridGain clusters in various environments.
 Internally to GridGain, there is a [project goals presentation](https://docs.google.com/presentation/d/1EafadCta4LH6VcilLQFJ4wfXdda5J67i/edit?slide=id.p1#slide=id.p1) that may be useful for understanding the structure of the toolkit. This presentation covers the currently supported environments as well as future considerations, so we will not try to keep that information synchonrized here.
 
@@ -157,9 +162,16 @@ convention, not ours.
 
 ### Setup — one command
 
+Two tools are needed first: **sops** encrypts and decrypts the file, and **age** holds the key it
+uses. On macOS, `brew install sops age`. On Linux, take them from your distribution's package
+manager if it carries them — neither is in every distribution's default repositories — or take the
+static binaries from [sops releases](https://github.com/getsops/sops/releases) and
+[age releases](https://github.com/FiloSottile/age/releases).
+
+Then, once per repo, from the project root:
+
 ```bash
-brew install sops age            # once per laptop
-./scripts/bootstrap-secrets.sh   # once per repo; idempotent, safe to re-run
+./scripts/bootstrap-secrets.sh   # idempotent, safe to re-run
 ```
 
 It creates an age key if you have none, writes `.sops.yaml` with your public key, and creates
