@@ -9,24 +9,29 @@ and related infrastructure.
 This project does **not** contain plugin source code — all custom Gradle tasks come from the
 `gridgain-demo-gradle-plugin` resolved via Maven. Do not add bespoke Gradle tasks here.
 
-## Using the toolkit — read the skills
+## Using the toolkit — the skills are here
 
-The toolkit ships two usage skills that document how to deploy/tear down elements, edit
-`demo-config.yaml`, choose plugin tasks, and run the data generator — including non-obvious behavior
-you'd otherwise rediscover the hard way (e.g. `dataGenerate` has no rate-override property; multi-pod
-generator rate is per-pod, so total ≈ rate × pods).
+Two usage skills ship **in this project**, under `.claude/skills/`:
 
-This template consumes the plugin/generator from Maven and has **no sibling repos**, so read the
-skills from their canonical location on GitHub (fetch the raw form to read them in-session):
+- **`gridgain-demo-toolkit`** — the plugin's task surface, the `demo-config.yaml` element types,
+  schema versioning, and how the data generator is dispatched.
+- **`gridgain-demo-data-generator`** — the generator's own `ops.yaml` / `data.yaml` config surface
+  and semantics.
 
-- **Toolkit (plugin tasks, element types, generator dispatch):**
-  `https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin/blob/main/.claude/skills/gridgain-demo-toolkit/SKILL.md`
-- **Data generator (ops.yaml/data.yaml config + semantics):**
-  `https://github.com/GridGain-Demos/gridgain-demo-data-generator/blob/main/.claude/skills/gridgain-demo-data-generator/SKILL.md`
+They auto-load when Claude Code is run from this directory, so there is nothing to fetch and
+nothing to set up. Both document behaviour that is otherwise rediscovered the hard way — that
+`dataGenerate` has no rate-override property, that a multi-pod generator's rate is per pod so the
+total is roughly rate × pods, that `OPTION_LIBS` does not exist on the `hosts` platform.
 
-Those skills are the source of truth and are kept current in their own repos — don't copy them here
-(a local copy would drift). When working inside the full toolkit workspace (sibling repos present),
-they also auto-load from each repo's `.claude/skills/`.
+They are **copies**, and the copy is deliberate. A fetched URL is not a registered skill, so it
+only ever helps a reader who already knew to go and get it; it assumes a public repo and a network;
+and it points at `main`, which is ahead of the plugin version this project pins. A copy that ships
+with a release matches the release.
+
+Each is authored in the repo it documents — the toolkit skill in `gridgain-demo-gradle-plugin`, the
+generator skill in `gridgain-demo-data-generator` — and refreshed here by that plugin's
+`bin/sync-scaffold.sh`. So **edit them there, not here**: an edit made in this copy is what the
+next sync discards.
 
 ## Build setup
 
