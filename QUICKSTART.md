@@ -28,11 +28,19 @@ the permissions are the part with a lead time.
 
 ```bash
 git clone https://github.com/GridGain-Demos/gridgain-demo-template
-cp -r gridgain-demo-template my-demo      # your project, not a checkout of ours
+cp -r gridgain-demo-template my-demo
 cd my-demo
+
+# Make it yours rather than a checkout of ours. `cp -r` copies `.git` too, so without
+# this your project's history and its `origin` are still this template's.
+rm -rf .git && git init && git add . && git commit -m "Initial commit"
 
 ./gradlew launchPluginUi
 ```
+
+(If you do not intend to use git at all, `rm -rf .git && rm .gitignore` instead — but keep
+`.gitignore` if there is any chance you will, because it is what stops a plaintext secrets file
+being committed.)
 
 Open **http://localhost:8080**. Use `-PuiPort=9090` for a different port.
 
@@ -48,13 +56,16 @@ would require, and start again.
 
 The same interview runs non-interactively. `./gradlew initDemoConfig` with no arguments reports
 every value it needs and the property that supplies it, so you do not have to know the list in
-advance. README.md's *Primary path — wizard-driven* section has the worked example.
+advance. It *fails* while doing so — there is nothing it could write yet — so the build error is
+the answer, not a fault. Add the properties it names and run it again. README.md's
+*Primary path — wizard-driven* section has the worked example.
 
 ## 3. Secrets
 
 Anything that is a genuine secret is kept in a SOPS-encrypted file rather than in open text in your
 configuration yaml file. Two tools do it: **sops** encrypts and decrypts the file, and **age** holds
-the key it uses. The wizard will check for and help you install these tools
+the key it uses. The wizard checks for both and, if either is missing, tells you where to get it
+for the machine you are on — it does not install anything itself.
 
 Worth knowing before you start: **most demos put nothing in that file.** A licence is a path to a
 file, a cloud credential is an account or profile *name* that the CLI you already logged in with
@@ -211,7 +222,9 @@ cd my-demo
 claude
 ```
 
-Nothing to fetch, nothing to configure. `/context` will list them if you want to confirm.
+Nothing to fetch, nothing to configure — a skill in `.claude/skills/` is picked up at startup.
+(Each skill's *description* loads then; its full text loads only when Claude actually uses it, so
+they cost you almost nothing until they are needed.)
 
 | Skill | What it covers |
 |---|---|

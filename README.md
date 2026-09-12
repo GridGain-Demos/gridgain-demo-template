@@ -82,7 +82,11 @@ Please do that before using the tool.
           
         Select 'Next' and give this profile a name, (suggested) `eksctl`
     - On the Security credentials tab of the new user's info, create and save an access key of type Command Line Interface (CLI)
-    - Install the AWS CLI `brew install awscli eksctl kubectl`
+    - Install the AWS CLI, eksctl and kubectl. On macOS: `brew install awscli eksctl kubectl`.
+      On Linux, each has its own documented install — the AWS CLI from
+      https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html, eksctl from
+      https://eksctl.io/installation/, kubectl from https://kubernetes.io/docs/tasks/tools/.
+      (`./gradlew validateRequirements` names whichever of them is missing, with where to get it.)
     - Configure an AWS CLI profile  `aws configure --profile <my-demo-profile>`
         - Supply it with the AWS Access Key (from above)
         - Supply it with the AWS Secret Access Key (from above)
@@ -97,12 +101,21 @@ Please do that before using the tool.
 
 - For GCP
     - A GCP account and project
-    - Install the gcloud CLI `brew install --cask gcloud-cli`
-    - Install kubectl `brew install kubectl`
-    - Install additional components ` gcloud components install gke-gcloud-auth-plugin gcloud-crc32c kubectl`
+    - Install the gcloud CLI. On macOS: `brew install --cask gcloud-cli`. On Linux, use the
+      documented installer at https://cloud.google.com/sdk/docs/install — and note the toolkit
+      needs its `gke-gcloud-auth-plugin`, `gcloud-crc32c` and bundled `kubectl` components too:
+      `gcloud components install gke-gcloud-auth-plugin gcloud-crc32c kubectl`
+    - Install kubectl. On macOS: `brew install kubectl`. Elsewhere:
+      https://kubernetes.io/docs/tasks/tools/
     - Run `gcloud components update`
-    - Incorporate this into your ~/.rshrc `export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"`
+    - If `gcloud` is not on your PATH afterwards, add its bin directory to your shell profile —
+      with a Homebrew install on macOS that is
+      `export PATH="/opt/homebrew/share/google-cloud-sdk/bin:$PATH"` in `~/.zshrc`; elsewhere it
+      is wherever the installer put it.
     - Run `gcloud init` to login
+
+  The toolkit checks each of those components and its version range, so a partial install is
+  reported by name rather than failing later inside a deploy: `./gradlew validateRequirements`.
 
 - For a writable image registry (required for the test-client and data-generator images)
 
