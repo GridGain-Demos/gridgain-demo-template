@@ -306,7 +306,7 @@ demo toolkit onto it instead of starting from the template directory.
 - A working `gradle/wrapper/` directory (`./gradlew`). Run `gradle wrapper` first if you don't
   have one.
 
-> The snippets below use plugin/UI version `0.7.0-SNAPSHOT`.
+> The snippets below use plugin/UI version `0.8.0-SNAPSHOT`.
 > Check the [plugin repo](https://github.com/GridGain-Demos/gridgain-demo-gradle-plugin) for
 > the current released version and update both the `id(...) version` and the matching
 > `implementation` / `runtimeOnly` coordinates in lock-step.
@@ -352,7 +352,7 @@ buildscript {
 
 plugins {
     java // or your existing language plugins
-    id("com.gridgain.demo.plugin") version "0.7.0-SNAPSHOT"
+    id("com.gridgain.demo.plugin") version "0.8.0-SNAPSHOT"
 }
 
 repositories {
@@ -389,9 +389,9 @@ the one you don't need** rather than hunt for the right coordinates.
 ```kotlin
 dependencies {
     implementation("org.yaml:snakeyaml:1.33")
-    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.7.0-SNAPSHOT")
+    implementation("com.gridgain.demo:gridgain-demo-gradle-plugin:0.8.0-SNAPSHOT")
     // UI project — provides the Ktor server for the launchPluginUi task
-    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.7.0-SNAPSHOT")
+    runtimeOnly("com.gridgain.demo:gridgain-demo-ui:0.8.0-SNAPSHOT")
 
     // ---------------------------------------------------------------------------
     // GridGain 9 runtime — keep this block if your target cluster is GG9.
