@@ -254,7 +254,7 @@ cd ../my-demo
     -Pwizard.ggVersion=9 \
     -Pwizard.monitor=none \
     -Pwizard.derivedImages=skip \
-    -Pwizard.region=us-west1 \
+    -Pwizard.region.gke=us-central1 \
     -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
     -Pwizard.secret.gcp_project=demo-project \
@@ -481,7 +481,7 @@ mkdir -p src/main/resources
     -Pwizard.ggVersion=9 \
     -Pwizard.monitor=none \
     -Pwizard.derivedImages=skip \
-    -Pwizard.region=us-west1 \
+    -Pwizard.region.gke=us-central1 \
     -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
     -Pwizard.secret.gcp_project=demo-project \
