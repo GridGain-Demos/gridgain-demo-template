@@ -253,7 +253,7 @@ cd ../my-demo
     -Pwizard.platform=gke \
     -Pwizard.ggVersion=9 \
     -Pwizard.monitor=none \
-    -Pwizard.derivedImages=public \
+    -Pwizard.derivedImages=skip \
     -Pwizard.region=us-west1 \
     -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
@@ -267,10 +267,20 @@ cd ../my-demo
 #                           without one; control-center additionally needs
 #                           -Pwizard.secret.cc_license_file, cc_admin_email and
 #                           cc_admin_password.
-#   -Pwizard.derivedImages  public pulls the published test-client and data-generator
-#                           images and needs nothing else. skip is also fine — it costs
-#                           only connectTestClient and dataGenerate. build-and-push needs
-#                           Docker, a registry you can write to, and source checkouts.
+#   -Pwizard.derivedImages  skip needs nothing, and costs less than it sounds: both
+#                           dataGenerate and connectTestClient still run from your own
+#                           machine against the cluster. Only their in-cluster forms — a
+#                           distributed load run, and the test client as a pod — need an
+#                           image. build-and-push builds those images and pushes them to a
+#                           registry you own; it needs a container runtime, that registry,
+#                           and source checkouts of client-utils and the data generator.
+#                           There is no option to pull ours: the packages at
+#                           ghcr.io/gridgain-demos are private, so an anonymous pull fails
+#                           at deploy time.
+#   -Pwizard.demoUse        optional. Omit it for a load test, which is what the command
+#                           above is. Pass custom-demo if your own application images will
+#                           run in the cluster, and you will be asked for a registry to
+#                           push them to and pull them from.
 
 # 4. Verify the wizard's output and the plugin wiring.
 ./gradlew validateDemoConfiguration
@@ -470,7 +480,7 @@ mkdir -p src/main/resources
     -Pwizard.platform=gke \
     -Pwizard.ggVersion=9 \
     -Pwizard.monitor=none \
-    -Pwizard.derivedImages=public \
+    -Pwizard.derivedImages=skip \
     -Pwizard.region=us-west1 \
     -Pwizard.secret.ownership_tag=you \
     -Pwizard.secret.gcp_account=you@example.com \
