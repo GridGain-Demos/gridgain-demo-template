@@ -12,7 +12,7 @@ only the fast path, and deliberately repeats as little of it as possible.
 
 Two things:
 
-- **A Java 17 JDK.** [Adoptium](https://adoptium.net/) if you have none.
+- **Java between version 17 and 26 (inclusive).** [Adoptium](https://adoptium.net/) if you have none.
 - **git.**
 
 **You do not need to install Gradle.** This project carries the Gradle wrapper, so `./gradlew`
