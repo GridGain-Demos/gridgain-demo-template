@@ -53,8 +53,8 @@ Please do that before using the tool.
     - For GridGain, from a Chrome browser logged into your corporate account, open the Google Apps window
       (the 'nine dot' menu beside your profile). You should see an AWS Access option.
       For SEs, SAs and TAMs, this is a shared account, and we should all have the administrative permissions needed.
-      The shared account number is `930793918939`. Otherwise, the account number should be available from a dropdown
-      in the top-right corner of the console page.
+      The account number is shown in the dropdown in the top-right corner of the console page, and is what
+      `-Pwizard.secret.aws_account` wants — `aws sts get-caller-identity --query Account` prints it too.
     - Create a user in the [IAM Dashboard](https://console.aws.amazon.com/iam/home) The user must have the following
       permissions (at a minimum)
         - AmazonEC2FullAccess 
@@ -281,6 +281,21 @@ cd ../my-demo
 #                           above is. Pass custom-demo if your own application images will
 #                           run in the cluster, and you will be asked for a registry to
 #                           push them to and pull them from.
+#
+# Also worth knowing, per platform:
+#   -Pwizard.region.<gke|eks>   one per cloud, because the naming schemes do not overlap:
+#                           us-central1 is a GCP region and us-west-2 an AWS one, and
+#                           neither cloud recognises the other's. Omitting one is refused
+#                           rather than assumed — a guessed region fails a quarter of an
+#                           hour later inside a cloud API error instead of here.
+#   -Pwizard.nodeIdentity   gke only, optional. project-default lets GKE use the project's
+#                           default Compute Engine service account. Pass named-account,
+#                           with -Pwizard.secret.gke_node_service_account, if your
+#                           organisation forbids workloads running as that account — a
+#                           common policy, since it historically holds Editor on the whole
+#                           project. Getting this wrong fails at cluster-create time with a
+#                           permission error that reads like a missing container.admin and
+#                           is not one. See QUICKSTART.md section 4.
 
 # 4. Verify the wizard's output and the plugin wiring.
 ./gradlew validateDemoConfiguration

@@ -153,6 +153,38 @@ updates the subnet's Private Google Access:
 Reference: [GKE IAM](https://cloud.google.com/kubernetes-engine/docs/how-to/iam),
 [predefined roles](https://cloud.google.com/iam/docs/understanding-roles).
 
+**c. A service account for the nodes — if your organisation forbids the default one.**
+
+GKE runs every node pool as a service account. Name none and the API substitutes the project's
+default Compute Engine account, which historically carries Editor on the whole project — so many
+organisations forbid workloads from running as it.
+
+Where it is forbidden this is the one that will stop you, and **it does not look like itself**:
+cluster creation fails with a permission error that reads like a missing `roles/container.admin` —
+the role you have just been granted. Ask for both halves:
+
+- a service account for the nodes to run as, holding what nodes actually need: write logs, write
+  metrics, read Artifact Registry
+- permission for *you* to use it — `roles/iam.serviceAccountUser` on that account, which is the
+  third row of the table above
+
+Then tell the wizard, either by choosing **a service account you name** on the node-identity page,
+or on the command line:
+
+```bash
+-Pwizard.nodeIdentity=named-account \
+-Pwizard.secret.gke_node_service_account=<NAME>@<PROJECT>.iam.gserviceaccount.com
+```
+
+The toolkit applies it to the cluster's default node pool **and to every node pool it adds
+afterwards** — GKE takes the account per pool, so a demo with a cluster and a monitor has three of
+them. It pairs the account with the broad `cloud-platform` scope on purpose: with a named account
+the scope stops being the restriction and the account's IAM roles become it, while the narrow
+legacy scopes predate IAM on nodes and fail in ways that do not look like permissions.
+
+If your project permits the default account, choose **the project's default service account** and
+there is nothing here to ask for.
+
 Then, on your own machine:
 
 ```bash
