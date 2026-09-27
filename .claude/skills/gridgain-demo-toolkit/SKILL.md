@@ -1,11 +1,11 @@
 ---
 name: gridgain-demo-toolkit
-description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) — its Gradle task surface, the demo-config.yaml element types (infrastructures, hosts, distributions, clusters, databases, cdc_connectors, data_generators, monitors, connector_templates, proxies, secrets, assemblies, node pools, data model), the gke/eks/hosts platforms, host-machine observability (Prometheus, Grafana and an OpenTelemetry Collector under systemd), schema versioning, and how it dispatches the data generator. Use when deploying or tearing down demo elements, editing demo-config.yaml, picking which plugin task to run, debugging a deploy, or running a load test against a deployed cluster.
+description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) — its Gradle task surface, the demo-config.yaml element types (infrastructures, hosts, distributions, clusters, databases, cdc_connectors, data_generators, monitors, connector_templates, proxies, secrets, assemblies, node pools, data model), the gke/eks/hosts/docker platforms, host-machine observability (Prometheus, Grafana and an OpenTelemetry Collector under systemd), schema versioning, and how it dispatches the data generator. Use when deploying or tearing down demo elements, editing demo-config.yaml, picking which plugin task to run, debugging a deploy, or running a load test against a deployed cluster.
 ---
 
 # GridGain Demo Toolkit — Usage
 
-*Last updated: 2026-09-02*
+*Last updated: 2026-09-26*
 
 The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target-demo project consumes it via `includeBuild`/`mavenLocal` and invokes its Gradle tasks; demo projects must not add bespoke tasks. This skill is the usage map: tasks, the config model, and gotchas. For the **data generator's own config surface** (ops.yaml/data.yaml, rate kinds, transaction_scope, distribution), see the `gridgain-demo-data-generator` skill — this skill only covers how the plugin *dispatches* it.
 
@@ -17,7 +17,9 @@ The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target
 
 **Element hierarchy:** instances reference templates + accounts. e.g. a `clusters` entry → a `cluster_templates` entry → a `node_pool_templates` entry; an `infrastructures` entry → `infrastructure_templates` + `infrastructure_accounts`.
 
-**Platforms.** `platform` on a template — and, since v18, on every `clusters` entry — is one of `gke`, `eks`, `hosts`. The first two are Kubernetes; `hosts` deploys to a collection of pre-existing Linux machines over ssh with systemd supervision (GG8 only for now). Platform-specific fields are prefixed `k8s_` or `host_` and live inside their platform's `if`/`then` branch in the schema, never at the top level — a top-level platform field gets its defaults injected into every other platform's entries.
+**Platforms.** `platform` on a template — and, since v18, on every `clusters` entry — is one of `gke`, `eks`, `hosts`, `docker`. The first two are Kubernetes; `hosts` deploys to a collection of pre-existing Linux machines over ssh with systemd supervision; `docker` (since v28) runs containers on a single Docker daemon reached over a local socket, **GridGain 9 clusters only**. Platform-specific fields are prefixed `k8s_`, `host_` or `docker_` and live inside their platform's `if`/`then` branch in the schema, never at the top level — a top-level platform field gets its defaults injected into every other platform's entries.
+
+**`hosts` and `docker` prepare rather than provision.** Neither creates the thing it deploys onto: the machines and the daemon are the operator's, and a teardown removes only what the toolkit installed. The cloud platforms create and destroy their clusters.
 
 ## Task catalog
 
@@ -38,13 +40,14 @@ Tasks live in `src/main/kotlin/com/gridgain/demo/plugin/tasks/`. Most take `-P<n
 | `deployProxy` / `teardownProxy` | TCP proxy fronting a cluster or database (stable local address across redeploys) | `-PproxyName` | yes |
 | `deploySecrets` / `teardownSecrets` | materialize the `secrets:` entries as k8s Secrets | `-PsecretName` | yes |
 | `deployAssembly` / `teardownAssembly` | walk an `assemblies` entry, deploying/tearing down its elements in dependency order | `-PassemblyName` | yes |
-| `initDemoConfig` | build a `demo-config.yaml` from `-Pwizard.*` answers — no starter file is read, and the output is comment-annotated. Refuses to overwrite an existing file. | `-PdemoConfigFile`; the four choices `-Pwizard.platform` (`gke`\|`eks`\|`hosts`, comma-separated), `-Pwizard.ggVersion` (`8`\|`9`), `-Pwizard.monitor` (`control-center`\|`prometheus-grafana`\|`none`), `-Pwizard.derivedImages` (`skip`\|`build-and-push` — `public` parses but is **refused** at scaffold time, because the four packages at `ghcr.io/gridgain-demos` are private) — **all four required**; plus the optional `-Pwizard.demoUse` (`performance-testing`\|`custom-demo`, default: neither, which means a load test and no registry); then `-Pwizard.nodeIdentity` (`project-default`\|`named-account`) for `gke` — `named-account` additionally requires `-Pwizard.secret.gke_node_service_account`, and is what an organisation that forbids the default Compute Engine account needs; then `-Pwizard.region.<platform>` per cloud (`-Pwizard.region.gke=us-central1`, `-Pwizard.region.eks=us-west-2` — one each, since the clouds' region names do not overlap; an omitted one is refused rather than assumed), `-Pwizard.hosts`/`hostArchitecture`/`hostOsFamily`/`hostAuth` for `hosts`, and `-Pwizard.secret.<name>` per secret. Pass the four choices alone and the task reports every remaining value it needs at once. | yes |
+| `initDemoConfig` | build a `demo-config.yaml` from `-Pwizard.*` answers — no starter file is read, and the output is comment-annotated. Refuses to overwrite an existing file. | `-PdemoConfigFile`; the four choices `-Pwizard.platform` (`gke`\|`eks`\|`hosts`, comma-separated — **not `docker`**, which the wizard cannot scaffold and refuses by name; see §The `docker` platform), `-Pwizard.ggVersion` (`8`\|`9`), `-Pwizard.monitor` (`control-center`\|`prometheus-grafana`\|`none`), `-Pwizard.derivedImages` (`skip`\|`build-and-push` — `public` parses but is **refused** at scaffold time, because the four packages at `ghcr.io/gridgain-demos` are private) — **all four required**; plus the optional `-Pwizard.demoUse` (`performance-testing`\|`custom-demo`, default: neither, which means a load test and no registry); then `-Pwizard.nodeIdentity` (`project-default`\|`named-account`) for `gke` — `named-account` additionally requires `-Pwizard.secret.gke_node_service_account`, and is what an organisation that forbids the default Compute Engine account needs; then `-Pwizard.region.<platform>` per cloud (`-Pwizard.region.gke=us-central1`, `-Pwizard.region.eks=us-west-2` — one each, since the clouds' region names do not overlap; an omitted one is refused rather than assumed), `-Pwizard.hosts`/`hostArchitecture`/`hostOsFamily`/`hostAuth` for `hosts`, and `-Pwizard.secret.<name>` per secret. Pass the four choices alone and the task reports every remaining value it needs at once. | yes |
 | `deployMonitor` / `teardownMonitor` | standalone monitor — Control Center or Prometheus-Grafana on Kubernetes, or Prometheus + Grafana + OTel Collector as systemd units on one machine (`platform: hosts`) | `-PmonitorName` | yes |
 | `deployClusterMonitoring` / `teardownClusterMonitoring` | attach a monitor to a cluster | `-PclusterName`, `-PmonitorName` | yes |
+| `catalogMetrics` | inventory every metric reaching Prometheus, one file per producer (**read-only**) | `-PmonitorName`, `-PprometheusUrl`, `-PmetricsWindowDays` (default 15), `-PmetricsSnapshotDir` | yes |
 | `deployClusterDcr` / `teardownClusterDcr` | DCR bindings between clusters | `-PclusterName`, `-PconnectionName` | yes |
 | `takeSnapshot` / `restoreSnapshot` | cluster snapshot / restore | `-PclusterName`, `-PprofileName`, `-PsnapshotType`/`-PsnapshotId` | yes |
 | `connectTestClient` | run a test client against a cluster | `-PclusterName`, `-Pmode` (`in-cluster` (default)\|`local`); a `platform: hosts` cluster accepts **`local` only** — there is no namespace to dispatch a Job into | yes |
-| `dataGenerate` | run a generator scenario (see §Generator dispatch) | `--scenario` (req), **`--targetCluster` (req, every mode)**, `--ops`, `--data`, `--mode` (`local`\|`in-cluster`\|`hosts`), `--dataGenerator` (**required for `--mode=hosts`**), `--timeout` (in-cluster only), `--instanceIndex`/`--instanceCount` (**both or neither**; the key-space stripe a multi-process run needs) | **depends** |
+| `dataGenerate` | run a generator scenario (see §Generator dispatch) | `--scenario` (req), **`--targetCluster` (req, every mode)**, `--ops`, `--data`, `--mode` (`local`\|`in-cluster`\|`hosts`), `--dataGenerator` (**required for `--mode=hosts`**), `--timeout` (in-cluster only), `--instanceIndex`/`--instanceCount` (**both or neither**; `--mode=local` only — on `hosts` the fleet's stripes come from `host_instances_per_host`) | **depends** |
 | `deployMessageBroker` / `teardownMessageBroker` | `-PmessageBrokerName` | yes |
 | `dataGeneratorTeardown` | stop a distributed or host generator run, recording an optional end-of-run summary | `-PrunId` / `--runId` (req); optional summary figures are `--`-only (not `-P`): `--achievedRate`, `--totalOps`, `--errorCount`, `--avgLatencyMs`, `--p90LatencyMs`, `--p99LatencyMs` | yes |
 | `deleteDataGeneratorRun` | forget a finished run's record in `deployment.yaml` (refuses a live run) | `-PrunId` / `--runId` (req) | yes |
@@ -84,12 +87,16 @@ them and the record stores nulls — the sanctioned "nobody was watching" state,
 reports as an unavailable summary rather than as zeros. Blank values are treated as absent; do not
 pass `null` or `n/a` as a placeholder.
 
-**The Load page (`/load`) needs a broker address.** Set `uiKafkaBootstrap=<host:port>` in the demo
-project's `gradle.properties`; `launchPluginUi` forwards it as `-Dui.kafka.bootstrap` and logs
-whether it is set. It must be reachable **from the machine running the UI** — deliberately *not*
-read from the generator's `ops.yaml`, whose `kafka_bootstrap` is resolved from the generator's
-vantage point (cluster-internal DNS for an in-cluster run, which the UI cannot dial). Unset simply
-means the page reports itself unconfigured; the UI still starts.
+**The Load page (`/load`) needs a broker the UI can reach**, and from ops v9 there are two ways to
+give it one. If the toolkit deploys the broker, name it from the generator's `ops.yaml`
+(`broker: { kind: element, name: <a message_brokers entry> }`) and the UI resolves the address
+itself from `deployment.yaml` — **`uiKafkaBootstrap` is then neither read nor required**. It is
+needed only for a broker the toolkit does *not* deploy, whose ops literal is resolved from the
+generator's vantage point (cluster-internal DNS for an in-cluster run, which the UI cannot dial);
+set `uiKafkaBootstrap=<host:port>` in the demo project's `gradle.properties` and `launchPluginUi`
+forwards it as `-Dui.kafka.bootstrap`. Either way the page never guesses: it reports the actual
+obstacle per channel — broker not defined, disabled, not deployed, or no UI address for a literal
+— rather than one catch-all sentence. The UI still starts with none of it configured.
 
 ## Element types (demo-config.yaml)
 
@@ -97,21 +104,21 @@ Top level is keyed maps. Instances reference templates/accounts by name; the str
 
 | Key | Purpose | Variants / notes |
 |-----|---------|------------------|
-| `infrastructures` (+ `_accounts`, `_templates`) | cloud k8s env, or a set of Linux machines (region, zones) | template platform `gke`/`eks`/`hosts`; account provider `gcp`/`aws`/`host`. On `hosts`, `host_jdk_distribution` is **optional**: empty means no JDK is installed, which is valid only while nothing on those machines needs a JVM — a cluster *or* a `platform: hosts` data generator. Either on a JDK-less infrastructure is rejected at validation, naming the element. Adding a JDK to an infrastructure that had none changes `HostInfrastructurePlugin.preparedMarker` (it folds the JDK identity in with a deliberate `"no-jdk:no-jdk"` literal so the transition is visible), so those machines **re-prepare** and anything already running on them is interrupted. That is supported, not a workaround |
+| `infrastructures` (+ `_accounts`, `_templates`) | cloud k8s env, a set of Linux machines, or a Docker daemon (region, zones) | template platform `gke`/`eks`/`hosts`/`docker`; account provider `gcp`/`aws`/`host`/`docker`. On `docker` the template carries just `docker_network_name` and `docker_host_port_base`, and the account just `docker_context` — the name from `docker context ls`, required rather than defaulted to the active one, because the active context is ambient state and a socket path is a trap (the `default` context's `unix:///var/run/docker.sock` does not exist under Docker Desktop on macOS). On `hosts`, `host_jdk_distribution` is **optional**: empty means no JDK is installed, which is valid only while nothing on those machines needs a JVM — a cluster *or* a `platform: hosts` data generator. Either on a JDK-less infrastructure is rejected at validation, naming the element. Adding a JDK to an infrastructure that had none changes `HostInfrastructurePlugin.preparedMarker` (it folds the JDK identity in with a deliberate `"no-jdk:no-jdk"` literal so the transition is visible), so those machines **re-prepare** and anything already running on them is interrupted. That is supported, not a workaround |
 | `hosts` | one pre-existing machine in a `hosts` infrastructure | points **up** at its `infrastructure`; declares `zone`, `architecture`, `os_family`, and **three** addresses — `ssh_address` (how the controller reaches it), `advertised_address` (what a thin client dials), `bind_address` (what the JVM binds). Collapsing them works on a laptop VM and fails on a multi-NIC lab machine |
-| `distributions` | archives installed on machines | `type: gridgain` / `jdk` / `prometheus` / `grafana` / `otel-collector` / `data-generator`. The observability three are static Go binaries and need no JVM; `data-generator` is the exception that does, which is why an infrastructure hosting one needs a `host_jdk_distribution` even if it hosts no cluster. `data-generator` additionally requires `gridgain_major_version` (matched against the target cluster's, so a generator cannot be pointed at a cluster its thin client cannot speak to) and `launcher_name` — the script in the archive's `bin/`, invoked rather than reassembled as a `java -cp` line, because the generator's own build bakes the GG8 `--add-opens` flags into it. `otel-collector` additionally requires `binary_name`, because upstream publishes `otelcol`, `otelcol-contrib` and `otelcol-k8s` and only the config knows which was downloaded. Version floors are enforced at assembly, not by the schema (a `pattern` cannot compare 2.9.0 against a 2.47.0 floor): Prometheus ≥ 2.47.0 for the OTLP receiver, Grafana ≥ 9.0.0, collector ≥ 0.90.0. Common to every type: `artifacts` keyed by architecture with a `source` that is a `url` (host pulls), a `file` (controller pushes), or an `image` (controller pulls the named `images` entry, extracts `path_in_image`, pushes the result) — no fallback between them. `sha256` lives **inside** the `source`, not beside it: it is required for `url`/`file` and absent for `image`, whose archive does not exist until the controller builds it, so the checksum is computed after extraction. Verification always happens on the machine after transfer. A missing architecture is an error, never substituted; declare `any` for an arch-independent archive. An `image` source may also carry `exclude: [<relative path>…]` to leave directories out of the built archive — every byte is transferred to every machine |
-| `node_pool_templates` | hardware specs | `gke` / `eks` only — a `hosts` infrastructure has no node pools |
-| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | GG8/GG9 via image/template on k8s; **GG8 only** on `hosts`, via `host_gridgain_distribution`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
+| `distributions` | archives installed on machines | `type: gridgain` / `jdk` / `prometheus` / `grafana` / `otel-collector` / `node-exporter` / `data-generator` / `kafka`. The observability four are static Go binaries and need no JVM; `data-generator` is the exception that does, which is why an infrastructure hosting one needs a `host_jdk_distribution` even if it hosts no cluster. `data-generator` additionally requires `gridgain_major_version` (matched against the target cluster's, so a generator cannot be pointed at a cluster its thin client cannot speak to) and `launcher_name` — the script in the archive's `bin/`, invoked rather than reassembled as a `java -cp` line, because the generator's own build bakes the GG8 `--add-opens` flags into it. `otel-collector` and `node-exporter` additionally require `binary_name`, because upstream publishes `otelcol`, `otelcol-contrib` and `otelcol-k8s` and only the config knows which was downloaded. **`node-exporter` is the per-machine metrics agent**, and unlike the other three it is named by an *infrastructure* (`host_metrics_distribution`) rather than by a monitor: what it measures — the host's CPU, memory, disk and network — belongs to the machine. Note its tarball's root directory embeds the architecture (`node_exporter-1.12.1.linux-ppc64le`) while `expected_root_entry` is one per-distribution value, so a mixed-architecture estate needs **two** `distributions` entries, not two artifacts under one. Version floors are enforced at assembly, not by the schema (a `pattern` cannot compare 2.9.0 against a 2.47.0 floor): Prometheus ≥ 2.47.0 for the OTLP receiver, Grafana ≥ 9.0.0, collector ≥ 0.90.0. Common to every type: `artifacts` keyed by architecture with a `source` that is a `url` (host pulls), a `file` (controller pushes), or an `image` (controller pulls the named `images` entry, extracts `path_in_image`, pushes the result) — no fallback between them. `sha256` lives **inside** the `source`, not beside it: it is required for `url`/`file` and absent for `image`, whose archive does not exist until the controller builds it, so the checksum is computed after extraction. Verification always happens on the machine after transfer. A missing architecture is an error, never substituted; declare `any` for an arch-independent archive. An `image` source may also carry `exclude: [<relative path>…]` to leave directories out of the built archive — every byte is transferred to every machine |
+| `node_pool_templates` | hardware specs | `gke` / `eks` only — neither a `hosts` nor a `docker` infrastructure has node pools |
+| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | GG8/GG9 via image/template on k8s; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG9 only** on `docker`, via `docker_image` (a GG8 image is refused by name at plugin selection). On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
 | `databases` | non-GG DB | `postgres` / `mariadb` (image, port, databaseName, authSecretRef, initDdlLocation, resources, storage) |
 | `cdc_connectors` | Debezium + Kafka pipeline (source: a `databases`; sink: a `clusters`) | `kafka`, `kafka_connect` (`plugins[]`, `jvm_opts[]`), `debezium`, top-level `connectors[]` (extra Connect registrations w/ `__PLACEHOLDER__`→secret) |
 | `secrets` | k8s Secret the toolkit materializes at deploy time, and the payload the `hosts` platform reads on the controller | payload from a pluggable `source` (v1: `kind: sops` — a SOPS-encrypted YAML file + a top-level `path` key). **`source.file` resolves against the demo config's own directory**, like `gridgain8_license_file` and the generator's paths — so with the config at `src/main/resources/demo-config.yaml`, `file: secrets/x.sops.yaml` means `src/main/resources/secrets/x.sops.yaml`, not a `secrets/` at the repo root. Referenced **by name** from the `*_secret_ref` fields below |
-| `data_generators` | streaming data generator as a first-class element | Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive) + `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, and a host generator is one JVM under systemd. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
-| `monitors` | observability | `control-center` / `prometheus-grafana`. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
+| `data_generators` | streaming data generator as a first-class element | **Not available on `docker`** in this release; drive a Docker cluster from a local run against its published loopback endpoints instead. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
+| `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker`** in this release — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
 | `connector_templates` | cluster sidecars / agents | `cloud-connector` (CC) / `otel-collector` (Prom/Grafana) / `ignite-agent` |
 | `dcr_templates` → `dcr_connections` | replication | `gg8` (push) / `gg9` (pull) |
 | `image_registries` → `images` | container images by name | referenced by templates/databases/connectors |
 | `proxies` | TCP forwarder giving a cluster/database a stable local address | `listeners[]` name a target kind + service; `startDemoAccess` port-forwards through it |
-| `assemblies` | an ordered set of elements deployed/torn down together | `deployAssembly` walks it and reports config-drift skips at end-of-run |
+| `assemblies` | an ordered set of elements deployed/torn down together | `deployAssembly` walks it and reports config-drift skips at end-of-run. Kinds: `infrastructure`, `cluster`, `monitor`, `cluster_monitoring`, `database`, `cdc_connector`, `message_broker`, `data_generator`, `data_model`, `cluster_dcr`, `proxy`, `secrets` — pinned against the schema by `AssemblyElementKindSchemaTest` |
 | data model (`data_models` files) | zones + tables | `affinity_key` (PK column) → GG8 `WITH "AFFINITY_KEY"` / GG9 `COLOCATE BY`; zone `replicas` → GG8 `BACKUPS=replicas-1` |
 
 **Secret references must resolve.** Every `databases.<n>.auth_secret_ref`,
@@ -125,11 +132,11 @@ top-level `secrets:` section. Referencing a Kubernetes Secret created outside th
 externally created, user-owned Secret. In the UI these fields render as dropdowns over the
 `secrets:` section, driven by the `x-source-section` JSONSchema annotation.
 
-**Schema versioning:** `CURRENT_SCHEMA_VERSION` lives in `ConfiguredState.kt` (currently **21** — v21 added an optional `message_brokers` section, rewriting no values. v20 made `platform` required on every `data_generators` entry, derived from its infrastructure, and split the entry into `K8s` and `Host` variants. v19 did the same for `monitors` and moved the Kubernetes-only fields of a `prometheus-grafana` monitor into its platform branch. v18 added `hosts`/`distributions` and did the same for `clusters`). Breaking config changes bump it + add a `MigrateVNtoVN+1` in `ConfigMigration.kt`'s runner list + update JSONSchema + add a `ConfigMigrationTest` case. Configs auto-migrate forward before validation.
+**Schema versioning:** `CURRENT_SCHEMA_VERSION` lives in `ConfiguredState.kt` (currently **28** — v28 introduced the `docker` platform across infrastructure templates, accounts, cluster templates and clusters, writing nothing: every change is additive, so a v27 document is a valid v28 one. v27 introduced the optional `host_thread_pools` block on a hosts cluster template, writing nothing: sizing a pool during an upgrade would change every cluster's throughput and latency invisibly. v26 added the required `host_jvm_opts` to every `platform: hosts` data generator, written as `-Xms2g -Xmx2g`: with nothing set a generator ran on OpenJ9's defaults (8 MB heap growing to 15.4 GB, 3.9 GB nursery) and paused for close to a second, *inside* the operation latency it reports. v25 added the optional `host_cpus_per_host` on a `platform: hosts` data generator, rewriting no values. v24 added the optional `host_cpus_per_node` on a `platform: hosts` cluster, rewriting no values. v23 added the optional `host_metrics_distribution`/`host_metrics_port` on a hosts infrastructure template and `scrape_targets` on a host monitor, rewriting no values. v22 added the required `host_instances_per_host` to every `platform: hosts` data generator, written as `1` so an upgraded config starts the processes it started before. v21 added an optional `message_brokers` section, rewriting no values. v20 made `platform` required on every `data_generators` entry, derived from its infrastructure, and split the entry into `K8s` and `Host` variants. v19 did the same for `monitors` and moved the Kubernetes-only fields of a `prometheus-grafana` monitor into its platform branch. v18 added `hosts`/`distributions` and did the same for `clusters`). Breaking config changes bump it + add a `MigrateVNtoVN+1` in `ConfigMigration.kt`'s runner list + update JSONSchema + add a `ConfigMigrationTest` case. Configs auto-migrate forward before validation.
 
 ⚠️ **Migration rewrites the user's config file in place through SnakeYAML, which discards every comment in it.** Back the file up before running any task against a config below `CURRENT_SCHEMA_VERSION`, and be aware that a hand-maintained (especially gitignored) config loses its entire rationale on first migration. Hand-bumping `schema_version` is equivalent *only* when the config already states everything the migration would inject.
 
-`deployment.yaml` (runtime state) has its own `schemaVersion` with **no** migration — mismatch means tear down + redeploy. It is at **11**: v11 moved the pod and node-pool fields into `K8sDataGeneratorBaseSpec`, which changes `GkeDataGeneratorSpec`'s persisted shape non-additively (the fields are required and non-null, so a record written at 10 fails partway through loading). v10 did the same for a Prometheus & Grafana monitor's node counts. The gate fires with its tear-down message rather than letting a stale record fail deserialization with a generic error.
+`deployment.yaml` (runtime state) has its own `schemaVersion` with **no** migration — mismatch means tear down + redeploy. It is at **12**: v12 made a host data generator span every machine its infrastructure owns, so `HostDataGeneratorBase.host` (one `HostSpec`) became `hosts: List<HostSpec>` and gained `instancesPerHost` — and `DeployedHostDataGenerator` embeds the spec, so a record written at 11 cannot deserialize at all. ⚠️ **Upgrading the plugin past this therefore requires a tear-down and redeploy of any live host demo.** v11 moved the pod and node-pool fields into `K8sDataGeneratorBaseSpec`, which changes `GkeDataGeneratorSpec`'s persisted shape non-additively (the fields are required and non-null, so a record written at 10 fails partway through loading). v10 did the same for a Prometheus & Grafana monitor's node counts. The gate fires with its tear-down message rather than letting a stale record fail deserialization with a generic error.
 
 ## Message brokers (`message_brokers`)
 
@@ -152,22 +159,73 @@ drive a run wherever that run happens to be.
   `kind: image` source extracting `/opt/kafka`. That payload is jars and shell scripts, so one `any`
   artifact serves every architecture — no ppc64le build to chase, unlike the JDK. An image source
   declares no checksum, because the archive does not exist until the controller builds it.
-- **Two Kafka addresses, deliberately different.** `ops.yaml`'s `kafka_bootstrap` is the
-  *generator's* vantage point; `uiKafkaBootstrap` in `gradle.properties` is the *UI's*. Never derive
-  one from the other — an in-cluster generator's address is cluster-internal DNS a laptop cannot dial.
+- **Two Kafka addresses, deliberately different — for the *literal* form only.** An ops v9
+  `broker: { kind: address, … }` is the *generator's* vantage point and `uiKafkaBootstrap` is the
+  *UI's*; never derive one from the other, because an in-cluster generator's address is
+  cluster-internal DNS a laptop cannot dial. **A `broker: { kind: element, name: … }` reference is
+  not an address at all**, so this rule does not apply to it: each side resolves the name from its
+  own vantage point, and for a hosts broker — the only kind there is — both land on the same
+  advertised address. Prefer the reference; it is the form that needs no second setting.
 - **`control:` needs ops schema_version 5.** A generator archive built before v5 rejects it outright,
   so the rate slider requires a redeployed dist; `metrics:` alone is a v4 feature.
+- **A deployed broker publishes its address to `broker-endpoints.yaml`**, under
+  `<demoOutputDirectory>/client/`, beside `client-endpoints.yaml` and with the same contract shape:
+  the plugin is the sole writer, the schema (`schema/broker-endpoints.schema.json`, version 1) is
+  the only agreement with its reader, and the reader duplicates the version constant rather than
+  depending on the plugin. The address written is the one **recorded in `deployment.yaml`**, not one
+  re-derived from the spec, so the two files cannot disagree. The file is deleted when the last
+  broker is torn down, so an unresolvable name reads as "no broker is deployed". No ConfigMap is
+  emitted — a broker is hosts-only, so there is nothing to apply one to.
+- **Usable as an assembly element** (`kind: message_broker`, takes `name`). Put it **before** any
+  `data_generator` that publishes to it. Nothing validates that order: assemblies deploy in declared
+  order and `AssemblyValidator` has no cross-element ordering rules for any kind. It only bites a
+  Kubernetes generator with `replicas > 0`, whose pods publish at deploy time; a host generator
+  installs an archive and starts nothing until `dataGenerate`.
+- **`disabled: true` is honoured** by the deploy-all fan-out and by validation — it was parsed and
+  ignored until 2026-09-19, so a broker switched off was still deployed. `hasMessageBroker` stays
+  unfiltered on purpose, matching every sibling `has*`: a disabled name should report as disabled,
+  not as missing. ⚠️ A `disabled: true` block that also drops `platform:` still fails to
+  deserialize — Jackson needs the type id before anything reads `disabled`. Same for
+  `data_generators`, `clusters` and `monitors`; it is a workspace-wide idiom clash, not broker-specific.
+- **`validateDemoConfiguration` now exercises brokers**, so a machine outside the named
+  infrastructure, a missing JDK, colliding listen/controller ports or an unresolvable archive all
+  surface before any deploy. They used to fire first at `deployMessageBroker`.
+- **Teardown asymmetry, pre-existing:** `deployMessageBroker` fans out over every enabled broker
+  when `-PmessageBrokerName` is omitted; `teardownMessageBroker` requires the name.
+- **`teardownInfrastructure` refuses while a broker is deployed on it**, the way it already refuses
+  for clusters — teardown removes the install root, data root and service user out from under a
+  live `gridgain-kafka-*` unit. `forceDestroyInfrastructure` instead cascades the broker's record
+  and its endpoints entry away, because that path is for wreckage.
+- **This change bumps neither schema version.** demo-config stays **23** (widening the assembly
+  `kind` enum invalidates no document) and `deployment.yaml` stays **12**. Do not "fix" that: a
+  deployment bump has no migration path and forces every live host demo to tear down. In
+  particular, never add a non-defaulted field to anything reachable from `DeployedHostMessageBroker`
+  — it embeds the whole `HostMessageBrokerSpec`.
 
 ## The `hosts` platform
 
-Deploys GG8 to pre-existing Linux machines over ssh, supervised by systemd. First target is IBM Power
-(ppc64le, RHEL family), but nothing is hardcoded to it — architecture and OS family are **declared per
-host and verified against what the machine reports**, so the same path runs on any architecture.
+Deploys **GG8 or GG9** to pre-existing Linux machines over ssh, supervised by systemd. First target is
+IBM Power (ppc64le, RHEL family), but nothing is hardcoded to it — architecture and OS family are
+**declared per host and verified against what the machine reports**, so the same path runs on any
+architecture.
+
+**The version is chosen by the distribution, not by a separate key.** `host_gridgain_distribution`
+names a `distributions` entry, and that entry's `gridgain_major_version` selects
+`HostGridGainV8ClusterPlugin` or `HostGridGainV9ClusterPlugin`. One spec type serves both: the version
+does not change what a host cluster *is* — same machines, identity, directory tree, storage roots,
+timeouts — only what is installed and how it is started. See **GG9 on hosts** below for what differs.
 
 **Ownership split.** The infrastructure owns the machine: service identity, directory tree, OS tuning,
-firewall ports, and the **JDK** (shared between clusters). The cluster owns the **GridGain distribution**
-(a per-cluster choice), its config, licence, env file, systemd unit and start. So a second cluster on the
-same machines reuses the JDK but installs its own distribution.
+firewall ports, and the **JDK**. The cluster owns the **GridGain distribution** (a per-cluster choice),
+its config, licence, env file, systemd unit and start.
+
+⚠️ **One cluster per host infrastructure**, enforced by `HostGridGainClusterSpecAssembler` and
+deliberately kept — two clusters on one machine set would collide on ports, install directories and
+unit names. The split above describes *which layer owns what*, **not** a licence to co-tenant: the
+directory tree and unit names are separated by `host_instance_name`, but nothing separates the ports,
+so the guard refuses outright rather than checking disjointness. To compare two clusters (two GridGain
+versions, say) on the same hardware, **swap which one is enabled** rather than running both; to run
+them at once, give each its own infrastructure over a different set of machines.
 
 **"Deployed" means prepared, not reachable.** Machines always answer a ping; preparation does not. So
 `deployInfrastructure` reports the infrastructure absent until a marker written *last* by the creation
@@ -179,12 +237,13 @@ architecture, free disk and installed JDK against the configuration and reports 
 `<dataRoot>/<cluster>/{work,storage,wal,walarchive}`, `<logRoot>/<cluster>`. Versioned directory plus a
 `current` symlink, so an upgrade is a swap and a restart with no re-download.
 
-**Readiness ladder** (ordering is load-bearing): systemd `ActiveState`/`NRestarts` (liveness + crash-loop
-— `Type=simple` reports active on fork, so this alone is insufficient) → `control.sh --state` run **on the
-machine against 127.0.0.1** (sidesteps every firewall question a controller-side probe would face) →
-topology count via the REST endpoint → **then** activation, and only with persistence enabled. Activation
-must come last because the first activation of a persistent cluster fixes the baseline to the topology
-present at that moment; a node joining later runs outside it, degraded and silent.
+**Readiness ladder, GG8** (ordering is load-bearing): systemd `ActiveState`/`NRestarts` (liveness +
+crash-loop — `Type=simple` reports active on fork, so this alone is insufficient) → `control.sh --state`
+run **on the machine against the host's bind address** (sidesteps every firewall question a
+controller-side probe would face; not loopback, because `localHost` pins every port to that interface)
+→ topology count via the REST endpoint → **then** activation, and only with persistence enabled.
+Activation must come last because the first activation of a persistent cluster fixes the baseline to the
+topology present at that moment; a node joining later runs outside it, degraded and silent.
 
 **Teardown.** Cluster: stop (a clean SIGTERM checkpoints the WAL — never deactivate first), remove the
 unit, remove conf + licence + toolkit state. Data goes only per `host_storage.retain_on_cluster_destroy`;
@@ -213,8 +272,10 @@ Prometheus's OTLP receiver speaks HTTP only while the node's exporter is configu
 The flow is *node → collector (OTLP/gRPC) → Prometheus (OTLP/HTTP over loopback) → Grafana (loopback)*.
 Only Grafana's `root_url` uses the machine's advertised address; everything internal uses `127.0.0.1`,
 so no internal hop depends on lab routing or a firewall opening. Wiring a cluster to it is one field:
-`host_otel_endpoint: http://<advertised>:<grpc_listen_port>` on the **cluster template**, which
-`deployMonitor` prints as the exact lines to paste.
+`host_otel_endpoint` on the **cluster template** — `http://<advertised>:<grpc_listen_port>` with
+`host_otel_protocol: GRPC` for GG8, and `http://<advertised>:<http_listen_port>` with
+`host_otel_protocol: HTTP` for GG9, which cannot use gRPC (see **GG9 on hosts**). `deployMonitor`
+prints the correct pair for each version.
 
 **Readiness is two rungs per component**, and stops there — a cluster's third rung (topology, then
 activation) has no equivalent, because a Prometheus answering `/-/ready` is serving. Rung one is
@@ -228,14 +289,206 @@ password) and always keeps the installed archives and the logs. Data goes only p
 `host_storage.retain_on_destroy`.
 
 **The data generator on a machine.** A `platform: hosts` `data_generators` entry installs its
-`type: data-generator` archive and a systemd template unit on the infrastructure's machine, and runs as a
-single JVM — no pods, no replicas, no autoscaler. It is the one host element that is a JVM application
+`type: data-generator` archive and a systemd template unit on **every** machine its infrastructure owns,
+and one `dataGenerate` starts `host_instances_per_host` processes on each of them — a fleet, with the
+plugin assigning every process a disjoint key-space slice. No pods, no replicas, no autoscaler. Until
+v22 it was exactly one machine and one process, because nothing outside Kubernetes divided the key
+space; `GeneratorFleet` does that now. It is the one host element that is a JVM application
 rather than a Go binary, so its infrastructure needs a `host_jdk_distribution` even when it hosts no
 cluster. Put it on a machine that is *not* a data node: it is a client, and co-locating it has it
 competing with the thing it is meant to load. `host_distribution` sits on the generator rather than the
 infrastructure (unlike `host_jdk_distribution`) because a JDK is shared by everything on a machine set
 whereas a generator archive is pinned to one GridGain major version — an infrastructure hosting a GG8 and
 a GG9 generator would need two. See **Generator dispatch** below for the deploy/run/teardown split.
+
+**Both GridGain versions are drivable**, and this needed no toolkit code: the unit's `ExecStart` is
+the distribution's `launcher_name`, so a GG9 element is a GG8 element with a `data-generator-gg9`
+archive and `gridgain_major_version: 9`. `HostDataGenerateAction` refuses a mismatch between the
+archive's major version and the target cluster's, because the two thin clients pull incompatible
+Ignite runtimes. ⚠️ The **scenario files are not equally portable**: `ops.yaml` is version-neutral,
+but `data.yaml`'s `backups` and `write_synchronization_mode` are GG8 cache settings that GG9
+silently ignores — it provisions with SQL, where replication is a zone property. The same file
+therefore yields two replicas on GG8 and one on GG9. See the generator skill's **GridGain 9**
+section before comparing throughput across versions.
+
+**Host metrics (v23+).** `host_metrics_distribution` on a `platform: hosts` infrastructure template
+installs a `node-exporter` agent as a systemd unit (`gg-node-exporter-<infrastructure>`) on **every**
+machine that infrastructure owns, listening on `host_metrics_port` (9100 by default). Empty means no
+agent — the same empty-means-absent idiom `host_jdk_distribution` uses. A monitor collects them by
+listing `host:port` in its `host_prometheus.scrape_targets`, which becomes a `host-metrics` scrape
+job; addresses rather than a cross-reference, because the monitor may sit on an infrastructure that
+knows nothing about theirs, and **nothing cross-checks the port against `host_metrics_port`**.
+
+⚠️ **Without this a load test cannot answer its own question.** A GridGain node exports JVM and cache
+metrics over OTel and none of them describe the machine, so throughput can plateau with no way to
+tell a saturated server from a saturated client. Put the agent on *both* ends — the server machines
+and the load-client machines — or the sweep is still ambiguous.
+
+### GG9 on hosts
+
+Same infrastructure, same delivery, same teardown. Five things differ, and each one is a place the GG8
+shape looks right and is wrong.
+
+**The distribution ships no launcher.** GG8 has `bin/ignite.sh`. The GG9 distribution has **no `bin/`
+directory at all** — the container image starts its node from `docker-entrypoint.sh`, which sources
+`lib/bootstrap-functions.sh` and assembles a `java` command line. That command line is the launch
+contract, and `templates/hosts/cluster/v9/gridgain9-start.sh` reproduces it: the mandatory `--add-opens`
+list, `-classpath "<lib>/ignite-runner-*.jar:<lib>/*"`, `org.apache.ignite.internal.app.IgniteRunner`,
+then `--config-path --work-dir --node-name`. ⚠️ Its GC flags are **deliberately not** reproduced —
+the distribution emits `-XX:+UseG1GC`, which **Semeru/OpenJ9 rejects outright**, and Semeru is the JDK
+on ppc64le. Heap and GC come from `host_jvm_opts`, exactly as on the GG8 host path.
+
+**The node rewrites its own configuration.** GG9 persists local config changes back to the file it was
+started with, so the node is started on a **writable copy** under the data root (`<dataDir>/conf/`),
+refreshed from the placed `conf/` artifact on every start. Pointing `--config-path` at the placed copy
+would have the node mutating an artifact the deployment owns and compares against — and that copy is
+mode 0640.
+
+**Initialisation is mandatory, and lands mid-ladder.** A GG9 cluster does not exist until
+`cluster init`: nodes sit in `STARTING` and every cluster-scoped endpoint answers `409`. The ladder is
+therefore systemd → `node/state` answers *with any state* → `topology/physical` (all N nodes) →
+**init** → `topology/logical` (all N nodes). ⚠️ **Do not gate on `STARTED` before init** — it only
+arrives afterwards, so that wait deadlocks against the thing it is waiting to enable. `physical` is the
+only cluster endpoint that answers pre-init, and it is the real precondition for init, because init
+names the metastorage members by node name and they must be visible to be named.
+
+**Init is over REST, idempotent, and carries the licence inline.**
+`POST /management/v1/cluster/init` with
+`{metaStorageNodes, cmgNodes: [], clusterName, clusterConfiguration: "", license}` — the field is
+`license` (US spelling) and holds the **file's contents**, not a path. It is mandatory: omitting it is
+`400 "License must not be empty."` `gg9-cluster-init.sh` checks `cluster/state` first (409 → initialise,
+200 → no-op) and needs **python3** on the machine to escape the licence into the body, which the V9
+plugin asserts as a cluster-level prerequisite. No GG9 CLI is installed; REST does the whole job.
+
+**Keys that do not apply.** `host_modules` must be `[]` — GG9 has one `lib/` directory and no
+optional-module layout, and its REST endpoint is built in. The assembler **rejects** a non-empty
+`host_modules`, a non-zero `host_thread_pools` and a non-empty `host_control_center_url` rather than
+ignoring them. `host_connector_port`, `host_jmx_port`, `host_communication_port[_range]` and
+`multicast` are still **required fields** with no GG9 meaning — carried unused and documented as
+GG8-only in the schema, because forcing a second template shape would mean a migration for no gain.
+
+**Metric export works, and reaches the cluster differently.** `host_otel_endpoint` means the same
+thing on both versions, but GG8 wires its exporter into each node's configuration at startup while
+GG9 holds it in the **cluster** configuration — which does not exist until `cluster init`. So the V9
+plugin applies it *after* initialisation, as the last step of `initCommands`, with
+`gg9-metrics-config.sh`:
+
+`PATCH /management/v1/configuration/cluster`, `Content-Type: text/plain`, HOCON body
+`ignite.metrics.exporters=[{name=otel_exporter,exporterName=otlp,endpoint=…,protocol=…,compression=…,periodMillis=…}]`.
+It is a **named map**: a PATCH merges by `name`, and `ignite.metrics.exporters.<name>=null` removes
+one. Applying it to a running cluster starts the exporter within one export period — **no restart**.
+All 34 metric sources are enabled by default, so there is nothing else to turn on.
+
+⚠️⚠️ **A 400 from that endpoint is NOT a rejection.** The value is written to the metastorage and
+replicated *before* it is validated on application; every node then fails to apply it,
+`WatchProcessor` calls that a critical system error, and `StopNodeFailureHandler` **stops the node**.
+Sending `compression="NONE"` instead of `"none"` took both Power lab nodes down on 2026-09-23 — the
+REST call returned 400 with a perfectly clear message, and the cluster died anyway. So values are
+translated and validated on the controller (`HostClusterTemplateModel.v9OtelProtocol` /
+`v9OtelCompression`) **and** again in the script. Neither check is redundant.
+
+⚠️ **GG9 must use `host_otel_protocol: HTTP`.** Over gRPC its exporter logs
+`Failed to export metrics … Socket is closed` against the collector and delivers nothing; over
+`http/protobuf` it works. That also changes the port — the collector's `http_listen_port` (4318), not
+`grpc_listen_port` (4317) — and the toolkit appends OTLP's signal path `/v1/metrics`, which HTTP
+requires and gRPC does not. `deployMonitor` prints the correct pair for each version.
+
+**Metric names differ completely between the versions**, so the two dashboards cannot stand in for
+each other and do not collide: GG8 exports prefixed names (`cacheGroups_*`, `io_discovery_*`), GG9
+exports bare ones (`SessionsActive`, `AvailableProcessors`, `LoadAverage`). A host
+`prometheus-grafana` monitor provisions **both** overview dashboards, because it has no cluster
+context at provisioning time; the unused one simply has no series. GG9's `job` and `service_name`
+labels are the **cluster ID**, not a friendly name — `instance` is the node name.
+
+**Every metric carries a `metric_source` label**, added by the collector (`transform` processor, in
+both `templates/hosts/monitor/otelcol.yaml` and `templates/k8s/otel-collector/config-map.yaml`). For
+GG9 this is load-bearing, not a convenience: its OTLP exporter emits **bare** metric names and
+**zero** datapoint attributes, so a name exposed by several sources collapses onto one series and
+the writers race. Measured on 9.1.21: 38 sources exposed **307 (source, metric) pairs under 225
+names** — 82 measurements unreachable, and **eight sources entirely invisible** (all seven thread
+pools, plus per-table `storage.aipersist.tables.*`). The label restores them: on the Power lab the
+cluster went from 908 series / 225 distinct names to **1072 series / 329 (source, name) pairs**,
+with no GG9 series left unlabelled. Values are the source names you see in
+`GET /management/v1/metric/node/set` (`sql.plan.cache`, `thread.pools.sql-executor`).
+
+⚠️ **`transform` requires a contrib (or k8s) collector build**, not core `otelcol`. The hosts deploy
+runs `otelcol validate` against the rendered config before starting the unit, so a core build fails
+immediately and says so instead of timing out a readiness probe.
+
+### Bundled dashboards
+
+A host `prometheus-grafana` monitor provisions **four**: both cluster overviews (it has no cluster
+context at provisioning time, and the unused one simply has no series), `data-generator-overview`,
+and `infrastructure-nodes-overview`. `demo-combined-overview-v8` stays out — it is built around the
+Kubernetes GG8 demo's generator and nothing on this platform fills it.
+
+**`infrastructure-nodes-overview` is close to the point of having a monitor on this platform.** A
+GridGain node's own telemetry reports the JVM's view, so without node_exporter a saturation run
+shows throughput falling and cannot show whether a *server* ran out of CPU, disk or memory. It is
+deliberately **not** provisioned on Kubernetes, where nothing installs a node exporter.
+
+⚠️ **An infrastructure declaring `host_metrics_distribution` now opens the agent's port itself** when
+`host_manage_firewall` is true. It did not before, and the gap was invisible on machines running no
+firewalld: on the first firewalled host the exporter was active and answering on `127.0.0.1:9100`
+while firewalld held every other service's port open and not that one — Prometheus scraped nothing
+and the panels were empty exactly the way an idle machine is empty. ⚠️ The step is part of *creation*,
+so an already-prepared machine will not get it until its `state/.gg-infra-prepared` marker is removed.
+
+⚠️ `node_exporter`'s archive root carries the architecture (`node_exporter-<v>.linux-<arch>`) and
+`unpack.expected_root_entry` is declared per distribution, not per artifact — so a mixed-architecture
+estate needs one `distributions` entry per architecture.
+
+⚠️ Node metrics label `instance` as `<address>:<port>`, while a GridGain 9 cluster labels it with the
+**node name**. Lining a host's CPU up against its cluster's metrics is therefore a manual step.
+
+### The metrics catalogue (`catalogMetrics`)
+
+Writes an inventory of every metric reaching Prometheus to `<demoOutputDirectory>/metrics/` — an
+`index.yaml` plus one file per producer. Read-only: it queries Prometheus, and each GridGain 9
+cluster's management REST API. A **committed snapshot** lives at `src/main/resources/metrics/`;
+refresh it by passing `-PmetricsSnapshotDir=<this checkout>`, never by hand.
+
+**The four producers can be interrogated to very different depths, and the artefact says so.** Every
+file carries an `enrichment` block naming which probes answered, so a blank `help` is never
+ambiguous between "no description exists" and "we could not ask":
+
+| Producer | Names | Source of each metric | Description |
+|---|---|---|---|
+| GridGain 9 | Prometheus | **yes** — joined against `/management/v1/metric/node/set` | **yes**, same call |
+| GridGain 8 | Prometheus | encoded into the name (`cache_<name>_CachePuts`) | none available |
+| node_exporter | Prometheus | n/a | **yes** — scraped, so Prometheus holds TYPE/HELP |
+| data generator | Prometheus | n/a | none available |
+
+⚠️ **Prometheus holds no TYPE/HELP for anything pushed over OTLP** — GridGain 8, GridGain 9 and the
+generator all return `{}` from `/api/v1/metadata`. Only scraped targets have it. That is why the GG9
+REST join is necessary rather than merely richer.
+
+⚠️ **`-PmetricsWindowDays` bounds every query, and the default is 15 to match the shipped Prometheus
+retention.** The inventory of a **torn-down** cluster is often the valuable part — those series
+outlive the cluster — and a window shorter than the gap since teardown returns nothing while looking
+like a quiet estate.
+
+⚠️ **A torn-down element cannot be attributed to its configuration.** `disabled: true` entries are
+pruned during parsing, so a cluster left disabled has no name, infrastructure or GridGain version to
+match against. Its metrics are still catalogued, as `UNCLASSIFIED`, with a `note` explaining the
+shape of its job name. The version is not guessed.
+
+⚠️ Two GridGain 9 exporter defects to know about, both observed on 9.1.21:
+- **Disabling a metric source does not stop its export.** `MetricReporter.removeMetricSet` compares
+  the *metric* name against the *set* name, so it removes nothing until the exporter is rebuilt.
+  `partition.states.zone.*.table.*` reports `enabled: false` and keeps publishing.
+- **String and UUID gauges are silently dropped.** The whole `upgrade.rolling` source
+  (`InitialVersion`, `TargetVersion`, `State`, `UpgradedNodes`, `NotUpgradedNodes`) is strings, so it
+  never reaches Prometheus and the GG9 dashboard's rolling-upgrade panel cannot populate over OTLP.
+
+**Ports.** GG9 uses `discovery_port: 3344` (one port; there is no separate communication SPI),
+`management_port: 10300`, `client_port: 10800`. A GG9 cluster cannot run beside a GG8 one on the same
+machines anyway — see the one-cluster-per-infrastructure rule above — but give the two templates
+distinct ports regardless if they take turns on one machine set, so that a half-finished teardown
+cannot have the incoming cluster bind to the outgoing one's port.
+
+**Proven on hardware 2026-09-23**: a two-node GridGain 9 cluster on the Power lab's ppc64le LPARs —
+deploy, init, both nodes `STARTED`, and a redeploy that left both PIDs untouched with `NRestarts=0`.
 
 **Endpoints.** `client-endpoints.yaml` is at `schema_version: 2` with a required `deployment_kind`
 (`k8s`|`hosts`). A hosts entry has **no** `namespace` and no `in_cluster` context — its addresses go under
@@ -245,6 +498,82 @@ the consumer is concretely `client-finder-common`'s `ClientEndpointsLoader` (whi
 `EXPECTED_SCHEMA_VERSION = 2` and throws `SchemaVersionMismatchException` on anything else) feeding
 `AddressResolution`. Named here because confirming it once cost a whole session: the published jar can lag
 the source by days, so when a contract spans repos, **check the artifact, not just the code**.
+
+## The `docker` platform
+
+Containers on **one** Docker daemon, reached over a local socket. **GridGain 9 clusters only** —
+a GG8 image is refused by name when the plugin is selected, rather than assembled and then failed at
+deploy. No monitors, no data generators, no databases; those route to the shared "not supported on
+this platform" failure naming both ways out.
+
+Like `hosts`, it **prepares rather than provisions**: the daemon is the operator's and is never
+created or destroyed. A deploy creates the shared bridge network; a teardown removes it.
+
+### Addressing — three names, three questions
+
+| Concept | Value |
+|---|---|
+| peer-to-peer | the **container name**, resolved by the user-defined bridge's embedded DNS |
+| bind | every interface inside the container — a container is single-homed, so unlike a lab machine there is no wrong one to pick |
+| client-facing | `127.0.0.1:<published port>` on the machine running the toolkit |
+
+The network must be **user-defined**, never Docker's default bridge: only a user-defined network
+runs the embedded DNS server, and name resolution is the whole addressing model. Each node takes a
+block of `docker_host_port_base` (management, then client), published to **loopback only** — a demo
+cluster has no business being reachable from the local network.
+
+### Minimum configuration
+
+```yaml
+infrastructure_accounts:
+  local-docker: { disabled: false, provider: docker, docker_context: desktop-linux }
+infrastructure_templates:
+  local-daemon:
+    disabled: false
+    platform: docker
+    docker_network_name: gg-demo-net
+    docker_host_port_base: 20300
+cluster_templates:
+  docker-gg9:
+    platform: docker
+    docker_image: gridgain9          # an `images` entry
+    docker_jvm_max_mem: 2g           # required — see below
+    docker_jvm_min_mem: 1g
+    docker_work_dir: /opt/gridgain/work
+clusters:
+  gg9-local: { platform: docker, template: docker-gg9, infrastructure: local, docker_container_prefix: gg9-local }
+```
+
+### Two things that will bite
+
+**`docker_jvm_max_mem` is required, and it matters.** The GridGain image sizes its heap from the
+machine it can see, not from any limit on the container: measured on a 23 GiB Docker Desktop VM it
+chose `-Xmx16g` unprompted, and the same image on Kubernetes reported a 16 GiB maximum inside a pod
+limited to 10 GiB. Unset, several nodes on one laptop each believe they own the whole machine and the
+first real workload ends in the OOM killer, which names nothing useful.
+
+**`docker_work_dir` must be a path that already exists in the image**, and `/opt/gridgain/work` —
+the image's own `GRIDGAIN_WORK_DIR` — is the right answer. Docker copies a mount point's ownership
+into a fresh named volume **only when that path exists in the image**. A path invented for the
+purpose arrives `root:root`, and the node, which runs as a non-root user, dies at
+`Failed to create directory for partitions storage` before the grid starts.
+
+### The wizard does not scaffold this platform
+
+`-Pwizard.platform=docker` is refused by name. A Docker infrastructure has no cloud account, region,
+node pool or disk class, so every question the interview asks has no answer for it — see
+`WizardIntent.SCAFFOLDABLE_PLATFORMS`, which is deliberately the smaller set. Write the config by
+hand; the block above is a complete working one.
+
+### Readiness
+
+Three rungs, because `docker run -d` succeeding means only that the daemon accepted the container:
+the container stays **running** (polled — catches the node that dies on its config within seconds),
+the management API **answers** (any HTTP status, including the `409` GridGain 9 returns before init
+— demanding 200 would deadlock against the very step that fixes it), then the cluster is
+**initialised** over the published loopback port. A readiness wait also watches container liveness
+each cycle, so a node that exits mid-wait fails immediately with its status rather than running to
+the timeout.
 
 ## Generator dispatch (`dataGenerate`)
 
@@ -265,37 +594,119 @@ without one. The generic Tasks-page launcher still offers only `local`/`in-clust
 required params, and `--dataGenerator` is required *conditionally*, which that form cannot express.
 `--targetCluster` is different — required in *every* mode, so the generic form can and does render it.
 
-⚠️ **Four different spellings, and none is a typo.** `deployDataGenerator` / `teardownDataGenerator` / `warmupDataGeneratorPool` take the project property **`-PdataGeneratorName`** (`GridGainDemoPlugin.kt:410`); `dataGenerate` takes the Gradle option **`--dataGenerator`**; the cluster is **`--targetCluster`** as a Gradle option but reaches the generator as **`--target-cluster`**; and the key-space stripe is **`--instanceIndex` / `--instanceCount`** as Gradle options but reaches the generator as **`--instance-index` / `--instance-count`**. The camelCase→kebab split in the last two is the same rule both times: the Gradle option is the toolkit's, the kebab flag is the generator's own CLI. `InstanceStripe` holds all four spellings as constants and is the only place that translates — do not restate either form at a launch site. `dataGeneratorTeardown` is keyed on the run, not the element: `--runId` / `-PrunId` only.
+⚠️ **Four different spellings, and none is a typo.** `deployDataGenerator` / `teardownDataGenerator` / `warmupDataGeneratorPool` take the project property **`-PdataGeneratorName`** (`GridGainDemoPlugin.kt:410`); `dataGenerate` takes the Gradle option **`--dataGenerator`**; the cluster is **`--targetCluster`** as a Gradle option but reaches the generator as **`--target-cluster`**; and the key-space stripe is **`--instanceIndex` / `--instanceCount`** as Gradle options but reaches the generator as **`--instance-index` / `--instance-count`** (`--mode=local` only since v22 — on `hosts` the plugin derives the fleet's stripes and refuses the flags). The camelCase→kebab split in the last two is the same rule both times: the Gradle option is the toolkit's, the kebab flag is the generator's own CLI. `InstanceStripe` holds all four spellings as constants and is the only place that translates — do not restate either form at a launch site. `dataGeneratorTeardown` is keyed on the run, not the element: `--runId` / `-PrunId` only, and it takes **either the run group or any one instance id** — a host run is a fleet whose records are keyed per process (`<group>-i0`, `-i1`), and it tears down the whole group whichever you pass.
 
-⚠️ **A multi-process load test needs `--instanceIndex` / `--instanceCount`.** Nothing else divides the
-key space outside Kubernetes distributed mode. Launch N generators without them and every one starts
-each `sequence` value source at `start`, so they all write the *same* keys and contend on the same
-entries and partitions instead of doing N times the work.
+⚠️ **A multi-process host load test is now configuration, not repeated invocations.** Set
+`host_instances_per_host` on the generator (and give its infrastructure more machines if you want the
+load spread), then run `dataGenerate` **once**. The plugin derives the whole fleet — machines x
+instances — and assigns every process a disjoint key-space slice, so the indices cannot be duplicated
+by hand.
 
-```bash
-# four generators on one machine, dividing one key space
-for i in 0 1 2 3; do
-  ./gradlew dataGenerate --scenario load --targetCluster=power-payments \
-    --mode=hosts --dataGenerator=payments-load --instanceIndex=$i --instanceCount=4
-done
+```yaml
+data_generators:
+  payments-load:
+    platform: hosts
+    infrastructure: power-gen        # every enabled machine on it runs the generator
+    host_distribution: datagen-gg8
+    host_instances_per_host: 4       # 4 processes on each machine
+    host_timeouts: { unit_active: 120 }
 ```
 
-- **Both or neither**, and the index must be unique per process. One option without the other is
-  refused naming both, as are a non-integer, a count below 1, and an index outside `0..n-1`. Nothing
-  checks that a fleet used each index exactly once — two runs sharing an index write the same keys.
+```bash
+# one invocation; starts 4 processes per machine, each with its own slice
+./gradlew dataGenerate --scenario load --targetCluster=power-payments \
+  --mode=hosts --dataGenerator=payments-load
+```
+
+- **Reach for the generator's own `concurrency` first** (ops.yaml, v8+): threads inside one JVM are far
+  cheaper than whole JVMs, and until v8 a generator process was single-threaded and therefore capped by
+  GG round-trip latency no matter how many you launched. Use `host_instances_per_host` when one process
+  can no longer saturate its machine, or to spread load across machines.
+- **`--instanceIndex` / `--instanceCount` are now refused on `--mode=hosts`**, at plan time. They were
+  the old way to divide the key space by hand; the generator now derives it, and two sources of truth
+  for the same thing is how a slice gets silently discarded. They remain valid for `--mode=local`. The
+  message names `host_instances_per_host` as the replacement.
+- **One run group, one run.** Every process of a run reports under the same run group, so a single
+  `set_rate` or `stop` from the UI reaches all of it and `dataGeneratorTeardown -PrunId=<group>` stops
+  the whole fleet. Each process still has its own runId (a systemd instance name and an output
+  directory cannot be shared) and its own record in `deployment.yaml`, tied together by `runGroup`.
 - **Refused for a distributed (`distribution:`) in-cluster run**, at plan time, before any manifest is
   written. That path runs under the generator's Coordinator, which partitions the key space from
-  `partition_count`; a CLI stripe would be a second, disagreeing answer. The generator refuses the
-  combination too, but there the failure is every pod crash-looping with the reason in its log.
-- **The symptom of getting this wrong is not an error.** Measured on real hardware: 32 unstriped host
+  `partition_count`; a second answer would disagree.
+- **The symptom of getting striping wrong is not an error.** Measured on real hardware: 32 unstriped host
   processes against a 2-node GG8 cluster settled at 93 ops/s and 498 ms with **zero errors**, idle CPU
-  on both hosts, server pools at `active=0, qSize=0` — and 50M+ operations left 383 MB of data. See the
-  generator skill's gotcha 11.
-- **`--mode=hosts` needs the unit re-installed after upgrading the plugin.** The stripe rides in the
-  per-run `run.env` as `INSTANCE_ARGS` and the unit reads it as `$INSTANCE_ARGS` — unbraced, so systemd
-  word-splits it into two flags or none. A unit installed by an older `deployDataGenerator` has no such
-  line, so it would ignore the variable silently: `teardownDataGenerator` + `deployDataGenerator` before
-  relying on the flags.
+  on both hosts, server pools at `active=0, qSize=0` — and 50M+ operations left 383 MB of data. That is
+  what the plugin-assigned stripes exist to make unreachable. See the generator skill's gotcha 11.
+- ⚠️ **`--mode=hosts` needs the unit re-installed after upgrading the plugin.** The unit reads
+  `--run-group ${RUN_GROUP}` from the per-run `run.env`; it used to read `%i`, the systemd instance
+  name. A unit installed by an older `deployDataGenerator` therefore makes every process its own run
+  group of one, so a `set_rate` re-paces a single JVM and a `stop` ends one process — both accepted,
+  neither reported. The stripe rides in the same file as `INSTANCE_ARGS`, read unbraced so systemd
+  word-splits it into two flags or none. The unit also gained `--instance-id %i`, without which the
+  generator mints an id the plugin has never heard of. `teardownDataGenerator` + `deployDataGenerator`
+  every element in the same pass as the plugin upgrade.
+
+### Splitting one machine between a cluster and its generator
+
+A `data_generators` entry may name the **same infrastructure as a cluster** — nothing forbids it.
+`HostReferenceValidator` rejects two `hosts:` entries sharing an `ssh_address`, which is a
+different thing; a generator opens no ports, installs under `$installRoot/<its own name>`, uses
+unit `gridgain-datagen-<name>@<runId>`, and reuses the infrastructure's JDK and script library.
+So co-locating load with the servers is a configuration change, not a code change.
+
+Pinning the two apart is the part that needed a feature:
+
+```yaml
+clusters:
+  power-demo:      { host_cpus_per_node: 32 }   # takes cores 0-3 -> CPUAffinity=0-31
+data_generators:
+  power-gen-load:  { host_cpus_per_host: 32 }   # takes cores 4-7 -> CPUAffinity=32-63
+```
+
+- ⚠️ **`CPUAffinity` restricts, it does not reserve.** Pinning only the cluster leaves generator
+  threads scheduled onto the server's CPUs anyway. Both sides must be pinned.
+- **Whole physical cores, not disjoint CPUs.** Handing the generator the SMT threads the cluster
+  did not take would satisfy a set-intersection check while putting a generator thread on *every*
+  server core, competing for its L1, L2 and issue slots. So a cluster that shares its machines
+  switches from the spread allocation to whole cores — `coLocatedGeneratorCpus` on its spec,
+  resolved at assembly from any pinned generator on the same infrastructure.
+- **The generator's offset is derived, never typed.** The assembler finds the co-located capped
+  cluster and records `reservedCpus`; the generator's mask starts after those cores. A typed
+  offset would be a third number that must agree with the other two, with nothing checking it.
+- `host_cpus_per_host` is **per machine and shared by every `host_instances_per_host` instance** —
+  one template unit renders one mask and all `@<runId>` instances inherit it.
+- ⚠️ **Two capped clusters on one infrastructure** already overlap each other (both start at the
+  first core). A pinned generator there is refused at validation, naming both.
+- `deployDataGenerator` warns when the cluster is capped and the generator is not (the state every
+  config is in after upgrading), when the generator is pinned and the cluster is not, and when the
+  two together ask for more CPUs than a machine has.
+- The mask reaches the JVM: `Runtime.availableProcessors()` follows it, so the generator's pool
+  sizing and `ops.yaml` `concurrency` are measured against the pinned set.
+
+### Capping a host cluster's CPUs (`host_cpus_per_node`)
+
+Optional, on a `platform: hosts` **cluster** (not its template — how much of a machine *this
+deployment* may use is a property of the deployment). Rendered as the unit's `CPUAffinity`.
+
+- ⚠️ **PER NODE.** The mask is applied on every machine, so 3 machines × 16 presents **48** to the
+  licence. The licence counts the cluster, not the machine.
+- **This is a licence control, measured not assumed.** GG8's `GridEntLicenseProcessor` counts
+  `Runtime.availableProcessors()` summed across the topology, and `sched_setaffinity` moves it.
+  Verified on the Power lab 2026-09-20 by capping a two-node cluster one node at a time and
+  reading its own log line: `Maximum number of CPUs (128/64) is exceeded` → `(96/64)` → no
+  violation. `deployCluster`'s over-capacity warning now names the key and works out the value.
+- **The CPUs are chosen spread across cores, not as `0-(n-1)`.** On ppc64le at SMT=8 a core's
+  eight threads are numbered consecutively, so a contiguous range of 32 is four whole cores with
+  four idle; x86 generally numbers the other way. Each machine's CPU→core map is recorded by
+  preflight (`cpu_topology`) and `CpuAffinity` picks round-robin by core.
+- ⚠️ **A machine prepared before that fact existed has no map**, and a capped cluster then refuses
+  to render rather than guessing. Re-run `deployInfrastructure` for the cluster's infrastructure.
+- A cap above a machine's CPU count is **warned about, not refused** — one cap covers every
+  machine and an infrastructure may be uneven. The node runs on the whole machine there, and
+  `coreDemandOf` counts `min(observed, cap)` so the licence figure never credits an inert cap.
+- ⚠️ **A hand-made systemd drop-in overrides what the plugin renders, silently.** If you capped a
+  cluster by hand while testing, delete
+  `/etc/systemd/system/gridgain-<instance>.service.d/*.conf` before relying on this key.
 
 **Every mode names its cluster.** Since ops schema v7 removed `ops.yaml`'s `targets:` block, `--targetCluster` is required in all three modes and is the only thing that says which cluster a run writes to. The GridGain flavour is derived from it (`TargetResolution.resolveTarget`, which reads `ConfigurationQueries`, **not** ops.yaml), so the classpath, image or archive follows the cluster you name rather than a field in the ops file. A host run additionally needs *which machine* and *which installed archive*, which only the `data_generators` entry says — hence `--dataGenerator` on top.
 
@@ -304,7 +715,9 @@ done
 - **The unit is `gridgain-datagen-<name>@`, not `gridgain-datagen@`.** The element name is in the filename deliberately: two generators on one machine would otherwise install the same template unit at the same path with different rendered contents, and the second deploy would silently overwrite the first.
 - **Deploy readiness is `systemctl cat`, not `systemctl is-active`.** A template unit has no instance until a run starts one, so `is-active` reports `inactive` on a perfectly good install — and the generator binds no socket anywhere, so there is nothing to probe either.
 - **Host run state is three distinct variants** — `HostRunning`/`HostFailed`/`HostCompleted` — not the k8s records with nullables. A host run has no namespace, replica count or image; those are questions that do not apply. A `DataGeneratorRunRecord` interface carries what all six share. (The UI's run card renders them already but still shows namespace/replicas; host name and unit instance are what it should show.)
-- **The run's choices arrive in a per-run `run.env`, not in the unit.** `ExecStart` is rendered at *deploy* time and `%i` (the runId) is its only run-time variable, so `--target-cluster` and `--scenario` could not be baked in. `dataGenerate` writes `<runs_root>/<runId>/run.env` carrying `TARGET_CLUSTER=`, `SCENARIO=` and `INSTANCE_ARGS=`, and the unit reads it with `EnvironmentFile=` — deliberately **without** a leading `-`, so a missing file fails the start rather than launching with an empty cluster. Ordering is load-bearing: the file is pushed after the run-directory script and before `systemctl start`, because systemd opens it at start.
+- **The run's choices arrive in a per-run `run.env`, not in the unit.** `ExecStart` is rendered at *deploy* time and `%i` (the runId) is its only run-time variable, so `--target-cluster` and `--scenario` could not be baked in. `dataGenerate` writes `<runs_root>/<runId>/run.env` carrying `TARGET_CLUSTER=`, `SCENARIO=`, `RUN_GROUP=`, `INSTANCE_ARGS=`, `BROKER_ARGS=` and `OTEL_RESOURCE_ATTRIBUTES=`, and the unit reads it with `EnvironmentFile=` — deliberately **without** a leading `-`, so a missing file fails the start rather than launching with an empty cluster. Ordering is load-bearing: the file is pushed after the run-directory script and before `systemctl start`, because systemd opens it at start.
+  - **`OTEL_RESOURCE_ATTRIBUTES` is read by the generator, not by systemd** — it is never interpolated into `ExecStart`, it just reaches the JVM's environment, so it needs no unit change and works on a unit of any age. It carries `service.instance.id` (the runId), `service.namespace` (the infrastructure name, which is what the GG8 node also sets, so both land in one namespace), `host.name`, `gridgain.demo.cluster` and `gridgain.demo.scenario`. Without it every process on the platform exported one identity — `service.name` alone — so the instances of a fleet **overwrote each other's series** and the gauges flapped between them. `service.name` is deliberately not set: the generator applies this variable over its own built-in, so naming it would split one dashboard into one series per run.
+  - ⚠️ **An attribute Prometheus does not promote is dropped in silence.** `templates/hosts/monitor/prometheus.yml` lists all five in `promote_resource_attributes`, but a **monitor deployed before that change keeps its own copy** — `service.instance.id` and `service.namespace` were already promoted for the node's sake, the other three were not. `dataGenerate` prints which ones need a monitor redeploy on every host run; there is no drift detection, deliberately (it would be an ssh round trip on the happy path to print a shorter sentence).
   - ⚠️ **`$INSTANCE_ARGS` is unbraced in `ExecStart`; the other two are braced, and both forms are deliberate.** systemd splits `$VAR` at whitespace into *zero or more* arguments and passes `${VAR}` as exactly one. The stripe is an optional *pair* of flags and `ExecStart` cannot include a flag conditionally, so it needs the splitting form — `${INSTANCE_ARGS}` would hand the generator `"--instance-index 0 --instance-count 4"` as a single token, and an empty one as a single empty argument. A cluster or scenario name is one value, so those stay braced. `INSTANCE_ARGS=` is written on every run, empty when the run owns the whole key space.
   - ⚠️ It is installed with a direct `install` argv, **not** through `place-config.sh`. That script does `install -d -o root -g root` on its destination's parent, which would chown the run's own output directory away from the service user — the generator would then fail every write while systemd reported the unit `active`. Same trap as the `install -d` gotcha below; do not "simplify" this back onto the shared helper.
   - Before this existed, the unit baked `--scenario` from the *element's* `scenario` field while the run pushed its own `ops.yaml`, so `--scenario X` ran whatever the element declared — and `deployment.yaml` recorded X regardless. Fixed; noted because a pre-fix archive still behaves that way.
@@ -320,7 +733,8 @@ Key behaviors that bite on the Kubernetes modes:
 - **Rate is per-pod, not divided** — total ≈ `ops_per_second × replicas` (see the generator skill). Pre-divide if you want a total target.
 - **Teardown:** distributed runs → `dataGeneratorTeardown -PrunId=<id>` (deletes by name; runId is printed by `dataGenerate`). Alternatively delete by label: `kubectl delete deployment,configmap,serviceaccount,role,rolebinding -l gridgain.com/scenario=<scenario> -n <cluster-namespace>` — wipes the current run **and any orphans**. Single-Job runs self-clean on success.
 - **Manifest labels** (for selectors): `app.kubernetes.io/name=gridgain-demo-data-generator`, `gridgain.com/scenario=<scenario>`, `gridgain.com/run-id=<runId>` (distributed also `gridgain.com/distributed=true`); namespace = the target cluster's namespace.
-- **Every launch path passes `--run-group`** (required by the generator). The plugin's runId is the group for a `dataGenerate` run — single-pod Job, distributed Deployment, local fork and the systemd unit (`%i`) all use it, so a fleet's live metrics aggregate correctly and one control command reaches all of it. The long-lived **element** Deployment is the exception: it has no runId, so its group is `element-<name>`, stable across scaling.
+- **Every launch path passes `--run-group`** (required by the generator). The plugin's runId is the group for a `dataGenerate` run — single-pod Job, distributed Deployment, local fork and the systemd unit all use it, so a fleet's live metrics aggregate correctly and one control command reaches all of it. The long-lived **element** Deployment is the exception: it has no runId, so its group is `element-<name>`, stable across scaling.
+- **Every launch path except the local fork also passes `--instance-id`**, the *per-process* id: `%i` in the hosts unit (where the systemd instance name genuinely is this process's identity — the opposite of the `--run-group %i` bug above, which asked a per-process name to stand for the fleet) and `$(POD_NAME)` on both Kubernetes paths, the same string those manifests give `service.instance.id`. Without it the generator minted its own `RunId`, so the process the plugin started as `…-i0` reported itself as `20260919-203407-wiftm5` and the Load page row, the systemd unit, the run directory and the Grafana series were four names for one thing with nothing joining them. The local fork keeps the minted id: there is no launcher-side identity worth imposing.
 
 ## Generator images (`in-cluster` only)
 
@@ -372,6 +786,55 @@ authoritative list of what *is* public is `src/main/resources/standard-images.ya
 Ultimate, GridGain 9, Control Center backend/frontend, and Kafka. Anything not in that file has to
 be built and pushed.
 
+## ⚠️ `host_cpus_per_node` is a throughput knob, not just a licence knob
+
+Capping a GG8 cluster's CPUs moves `Runtime.availableProcessors()`, and Ignite
+derives **every** default pool size from that number — `pubPoolSize`,
+`sysPoolSize`, `stripedPoolSize`, `qryPoolSize`, and critically
+`ClientConnectorConfiguration.threadPoolSize`, which backs
+`GridThinClientExecutor` and is `max(8, availableProcessors)`. The node logs all
+of them in its `IgniteConfiguration [...]` startup line.
+
+That pool is the cluster's throughput ceiling, because **each thin-client
+request holds one of its threads for the whole request**, including the time
+spent waiting on a synchronous replica round trip. So:
+
+- maximum throughput ≈ **(CPUs × nodes) ÷ per-request latency**, and the
+  measured knee lands exactly on `CPUs × nodes` — 128 operations in flight for
+  two uncapped 64-CPU nodes, 64 when the same pair was capped to 32.
+- the CPU looks idle at the ceiling (~12 of 64 busy) because those threads are
+  *waiting*, not computing. Idle CPU is not spare capacity here.
+- **capping costs throughput directly.** Measured on the Power lab: halving the
+  servers to 32 CPUs took peak throughput from 219,388 to 168,265 ops/s (−23%),
+  while the capped servers used only 27% of the CPUs they were still allowed.
+
+Use it to fit a licence (§licence gotcha) or to isolate a co-located generator —
+not in the expectation that the freed CPU buys anything elsewhere.
+
+**To move the pool without touching the cores, use `host_thread_pools`** on the
+hosts cluster template (v27+). Every key is optional; omitting one leaves
+Ignite's default. `client_connector` is the one that sets the ceiling:
+
+```yaml
+cluster_templates:
+  power-gg8:
+    host_thread_pools:
+      client_connector: 256   # ClientConnectorConfiguration.threadPoolSize
+      striped: 128            # IgniteConfiguration.stripedPoolSize
+```
+
+Also accepts `public`, `system`, `query`, `data_streamer`, `rebalance`. Each has
+`minimum: 1` so 0 is unreachable from a file and can only mean absent — a
+literal 0 configures a pool with **no threads** rather than falling through to
+the default, and `additionalProperties: false` rejects a mistyped pool name that
+would otherwise tune nothing in silence. `client_connector` renders inside the
+`ClientConnectorConfiguration` bean and the rest on `IgniteConfiguration`; both
+beans have a property called `threadPoolSize`, and Spring accepts it on either.
+
+⚠️ These are **not** reachable through `host_jvm_opts` — they are Spring bean
+properties with no `IGNITE_*` system-property equivalent, which is why they
+needed a config surface of their own.
+
 ## Config-drift detection on redeploy
 
 Each per-element `Deploy*Action` records a SHA-256 fingerprint of its
@@ -383,7 +846,13 @@ current fingerprint to the recorded one:
 - **Match** (or no recorded hash yet) → action proceeds normally and stamps
   the current hash on success.
 - **Mismatch** → action logs a warning and **skips the element**. The
-  deployment.yaml record stays as-is. The walker (`deployAssembly`) appends
+  deployment.yaml record stays as-is. ⚠️ **The task still SUCCEEDS** — the
+  warning is printed and the build reports BUILD SUCCESSFUL, so a script that
+  checks the exit code sees nothing wrong and goes on to measure, or deploy
+  against, a stale element. Verify the rendered artefact (or read the value
+  back off the machine), never the return code. This cost a benchmark run that
+  reported a whole configuration's worth of numbers for a generator whose
+  systemd unit had never been updated. The walker (`deployAssembly`) appends
   the skip to `ctx.configDriftSkipped` and prints a summary at end-of-run
   listing every skipped element with its recorded vs current hash and the
   remediation: `teardownX` + `deployX`, or rerun with `-PforceRedeploy=true`.
@@ -453,6 +922,10 @@ schema_version bump.
   is healthy, the datasource resolves — and every panel is empty. `prometheus.yml` therefore sets
   `otlp.translation_strategy: UnderscoreEscapingWithSuffixes` and promotes `service.instance.id`,
   `service.name` and `service.namespace`. Both must stay in step with what the dashboards query.
+  GG9 needs no equivalent care: its exporter already sends undotted names, so they arrive bare
+  (`AvailableProcessors`, `LoadAverage`) and the same settings serve both versions. What GG9 *does*
+  leave odd is identity — `job` and `service_name` are the cluster's UUID, because that is what it
+  puts in `service.name`; `instance` is still the node name, which is what the dashboards group by.
 - **Bundled dashboards carry `${DS_PROMETHEUS}`, an import-time placeholder.** Grafana substitutes it
   when a dashboard is imported through the UI and *not* when it is file-provisioned, so a verbatim
   copy leaves every panel pointing at a datasource that does not exist. Both platforms rewrite it to
@@ -470,10 +943,12 @@ schema_version bump.
   produces an install the service user cannot enter — reported by systemd as `200/CHDIR`. The install
   script re-asserts 0755 afterwards; `--strip-components=1` discards that entry, which is why only the
   no-strip path was ever exposed.
-- **Setting `host_otel_endpoint` changes the delivered archive.** It derives `ignite-opentelemetry`
-  into the module list, and that list decides what is shipped — so the next cluster deploy reinstalls
-  the distribution. A *running* node does not pick the exporter up at all: it is wired into
-  `ignite-node-cfg.xml` at node start, so this needs `teardownCluster` + `deployCluster`.
+- **Setting `host_otel_endpoint` changes the delivered archive — on GG8.** It derives
+  `ignite-opentelemetry` into the module list, and that list decides what is shipped, so the next
+  cluster deploy reinstalls the distribution. A *running* GG8 node does not pick the exporter up at
+  all: it is wired into `ignite-node-cfg.xml` at node start, so this needs `teardownCluster` +
+  `deployCluster`. **None of that applies to GG9**, which has no module list and takes the exporter
+  as a live cluster-configuration update — see **GG9 on hosts**.
 - A generator run at the ops.yaml default rate on a single pod barely taxes GG — scale **pods** (`distribution.replicas`) to saturate, and divide the rate accordingly.
 - `transaction_scope: business_event` against the default ATOMIC SQL caches rolls back every write (GG8 8.9+) — see the generator skill.
 - CDC connector names are `<cdc_connectors-entry>-<connectors[].name>` (e.g. entry `mainframe-to-gg` + `cdc-sink` → `mainframe-to-gg-cdc-sink`), not the bare inner name.
@@ -515,6 +990,18 @@ schema_version bump.
   `build.gradle.kts`.** It is an allowlist, not an exclude list, and `--tests` does not override it —
   an unlisted class silently reports zero tests executed while the build goes green.
 
+- **`docker`: a named volume inherits the image path's ownership, but only if that path exists in
+  the image.** Mount a node's work directory at a path invented for the purpose and it arrives
+  `root:root`; the node runs as a non-root user and dies at `Failed to create directory for
+  partitions storage` before the grid starts — which reads like a disk problem and is a permission
+  one. Use `/opt/gridgain/work`, the image's own `GRIDGAIN_WORK_DIR`. Reasoning about this the other
+  way round is easy and was in fact how the first version shipped.
+- **`docker`: the GridGain image ignores the container's memory limit when sizing its heap.** It
+  reads the machine. On a 23 GiB Docker Desktop VM it picked `-Xmx16g` unprompted; the same image on
+  Kubernetes reported a 16 GiB max heap inside a pod limited to 10 GiB. `docker_jvm_max_mem` is
+  required for this reason, and the Kubernetes path has the same latent fault with no equivalent
+  setting yet.
+
 ## Sources of truth (verify here when exact)
 
 - tasks + options: `src/main/kotlin/com/gridgain/demo/plugin/tasks/*Task.kt`
@@ -524,7 +1011,10 @@ schema_version bump.
 - host monitor: `…/core/infrastructure/HostPrometheusGrafanaPlugin.kt`, `…/core/specs/MonitorSpec.kt` (`HostPrometheusGrafanaMonitorSpec`), `…/core/configuration/MonitorSpecAssembler.kt` (`HostPrometheusGrafanaSpecAssembler`), `…/core/recording/HostMonitorTemplateModel.kt`, `src/main/resources/templates/hosts/monitor/**`
 - JDK provision: `…/core/specs/HostJdkProvision.kt`
 - `hosts` platform: `…/core/infrastructure/HostInfrastructurePlugin.kt`, `HostGridGainV8ClusterPlugin.kt`, `HostStepBuilder.kt`, `HostResolvers.kt`, `…/core/deployment/HostClusterDeployer.kt`, `HostClusterDestroyer.kt`, `HostInfrastructureForceDestroyer.kt`, `HostLogDiagnostics.kt`, `…/core/command/SshCliExecutor.kt`, `src/main/resources/templates/hosts/**`
+- `docker` platform: `…/core/infrastructure/DockerInfrastructurePlugin.kt`, `DockerGridGainV9ClusterPlugin.kt`, `DockerStepBuilder.kt`, `DockerResolvers.kt`, `…/core/effect/DockerEffect.kt`, `…/core/recording/DockerClusterTemplateModel.kt`, `…/core/specs/InfrastructureSpec.kt` (`ContainerBase`, `DockerInfrastructureSpec`), `…/core/specs/ClusterSpec.kt` (`ContainerClusterBase`, `DockerGridGainClusterSpec`), `…/core/state/DeployedDockerInfrastructure` + `DeployedDockerCluster`, `src/main/resources/templates/docker/**`, `src/main/resources/tooling/docker_tool_requirements.yaml`
 - endpoints contract: `src/main/resources/schema/client-endpoints.schema.json`, `…/core/infrastructure/ClientEndpointsWriter.kt`, `…/core/actions/ClusterEndpointPublisher.kt`
+- message broker: `…/core/configuration/MessageBrokerSpecAssembler.kt`, `…/core/specs/MessageBrokerSpec.kt`, `…/core/infrastructure/HostMessageBrokerPlugin.kt`, `…/core/deployment/HostMessageBrokerDeployer.kt` + `HostMessageBrokerDestroyer.kt`, `…/core/state/DeployedMessageBrokerState.kt`, `src/main/resources/schema/message-broker.schema.json`
+- broker endpoints contract: `src/main/resources/schema/broker-endpoints.schema.json`, `…/core/infrastructure/BrokerEndpointsWriter.kt`, `…/core/actions/MessageBrokerEndpointPublisher.kt` (shared atomic write: `…/core/infrastructure/AtomicEndpointsFileWrite.kt`)
 - generator dispatch: `…/core/datagen/InClusterDataGenerateAction.kt`, `DataGeneratorJobManifestWriter.kt`, `DistributedDataGeneratorManifestWriter.kt`, `LocalDataGenerateAction.kt`, `HostDataGenerateAction.kt`, `plugin/tasks/DataGenerateTask.kt`, `DataGeneratorTeardownTask.kt`
 - key-space striping: `…/core/datagen/InstanceStripe.kt` (the four spellings, the both-or-neither rule, and `generatorArgs()` — every launch path forwards through it), plus the four forwarding sites: `LocalDataGenerateAction.execute`, `DataGeneratorJobManifestWriter.buildJob`, `HostDataGenerateAction.renderEnvFile` + `templates/hosts/data-generator/gridgain-datagen.service`, and the plan-time refusal in `InClusterDataGenerateAction.planDistributed`
 - run records + delete: `…/core/state/DeployedDataGeneratorRun.kt` (incl. `DataGeneratorRunStats`), `DeploymentManager.kt`, `plugin/tasks/DeleteDataGeneratorRunTask.kt`
