@@ -996,11 +996,13 @@ schema_version bump.
   partitions storage` before the grid starts — which reads like a disk problem and is a permission
   one. Use `/opt/gridgain/work`, the image's own `GRIDGAIN_WORK_DIR`. Reasoning about this the other
   way round is easy and was in fact how the first version shipped.
-- **`docker`: the GridGain image ignores the container's memory limit when sizing its heap.** It
-  reads the machine. On a 23 GiB Docker Desktop VM it picked `-Xmx16g` unprompted; the same image on
-  Kubernetes reported a 16 GiB max heap inside a pod limited to 10 GiB. `docker_jvm_max_mem` is
-  required for this reason, and the Kubernetes path has the same latent fault with no equivalent
-  setting yet.
+- **The GridGain 9 image hard-codes a 16 GiB heap, on every platform.** `JVM_MAX_MEM=16g` and
+  `JVM_MIN_MEM=16g` are Dockerfile `ENV` defaults, and the entrypoint turns them into an explicit
+  `-Xmx`/`-Xms` — which beats the JVM's own container awareness, so no memory limit corrects it. A
+  pod limited to 10Gi still reported a 16 GiB maximum heap on GKE. `docker_jvm_max_mem` exists for
+  this reason and is required. **GridGain 9 on Kubernetes has no equivalent setting and is the one
+  path still exposed**: `hosts` sets `host_jvm_opts`, GridGain 8 on Kubernetes sets `JVM_OPTS`, and
+  Docker sets `JVM_MAX_MEM` — only the v9 StatefulSet sets nothing.
 
 ## Sources of truth (verify here when exact)
 
