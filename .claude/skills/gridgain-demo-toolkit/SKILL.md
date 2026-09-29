@@ -614,8 +614,9 @@ infrastructures:
 ```
 
 The cluster template is the `gke`/`eks` field set **minus `k8s_node_pool_template`**, and the cluster
-entry is the ordinary `k8s_namespace`/`k8s_service_name` pair. A complete working file is
-`gridgain-demo-toolkit-dev/src/main/resources/demo-config-ocp.yaml`.
+entry is the ordinary `k8s_namespace`/`k8s_service_name` pair. A complete working file lives in the
+dev workspace as `src/main/resources/demo-config-ocp.yaml` — every `demo-config*.yaml` is gitignored
+(they may carry secrets), so that one is local rather than something to check out.
 
 ### `restricted-v2`, which is the whole of the difference
 
