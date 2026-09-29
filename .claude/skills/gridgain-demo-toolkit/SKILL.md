@@ -1,11 +1,11 @@
 ---
 name: gridgain-demo-toolkit
-description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) — its Gradle task surface, the demo-config.yaml element types (infrastructures, hosts, distributions, clusters, databases, cdc_connectors, data_generators, monitors, connector_templates, proxies, secrets, assemblies, node pools, data model), the gke/eks/hosts/docker platforms, host-machine observability (Prometheus, Grafana and an OpenTelemetry Collector under systemd), schema versioning, and how it dispatches the data generator. Use when deploying or tearing down demo elements, editing demo-config.yaml, picking which plugin task to run, debugging a deploy, or running a load test against a deployed cluster.
+description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) — its Gradle task surface, the demo-config.yaml element types (infrastructures, hosts, distributions, clusters, databases, cdc_connectors, data_generators, monitors, connector_templates, proxies, secrets, assemblies, node pools, data model), the gke/eks/hosts/docker/ocp platforms, host-machine observability (Prometheus, Grafana and an OpenTelemetry Collector under systemd), schema versioning, and how it dispatches the data generator. Use when deploying or tearing down demo elements, editing demo-config.yaml, picking which plugin task to run, debugging a deploy, or running a load test against a deployed cluster.
 ---
 
 # GridGain Demo Toolkit — Usage
 
-*Last updated: 2026-09-28*
+*Last updated: 2026-09-29*
 
 The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target-demo project consumes it via `includeBuild`/`mavenLocal` and invokes its Gradle tasks; demo projects must not add bespoke tasks. This skill is the usage map: tasks, the config model, and gotchas. For the **data generator's own config surface** (ops.yaml/data.yaml, rate kinds, transaction_scope, distribution), see the `gridgain-demo-data-generator` skill — this skill only covers how the plugin *dispatches* it.
 
@@ -17,9 +17,9 @@ The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target
 
 **Element hierarchy:** instances reference templates + accounts. e.g. a `clusters` entry → a `cluster_templates` entry → a `node_pool_templates` entry; an `infrastructures` entry → `infrastructure_templates` + `infrastructure_accounts`.
 
-**Platforms.** `platform` on a template — and, since v18, on every `clusters` entry — is one of `gke`, `eks`, `hosts`, `docker`. The first two are Kubernetes; `hosts` deploys to a collection of pre-existing Linux machines over ssh with systemd supervision; `docker` (since v28) runs containers on a single Docker daemon reached over a local socket, **GridGain 9 clusters only**. Platform-specific fields are prefixed `k8s_`, `host_` or `docker_` and live inside their platform's `if`/`then` branch in the schema, never at the top level — a top-level platform field gets its defaults injected into every other platform's entries.
+**Platforms.** `platform` on a template — and, since v18, on every `clusters` entry — is one of `gke`, `eks`, `hosts`, `docker`, `ocp`. Three are Kubernetes (`gke`, `eks`, `ocp`); `hosts` deploys to a collection of pre-existing Linux machines over ssh with systemd supervision; `docker` (since v28) runs containers on a single Docker daemon reached over a local socket, **GridGain 9 clusters only**; `ocp` (since v30) deploys onto an **existing** OpenShift cluster reached through a named kubeconfig context, **GridGain 9 clusters only**. Platform-specific fields are prefixed `k8s_`, `host_`, `docker_` or `ocp_` and live inside their platform's `if`/`then` branch in the schema, never at the top level — a top-level platform field gets its defaults injected into every other platform's entries. `ocp` shares the `k8s_` fields with `gke`/`eks` because its workload is an ordinary Kubernetes one; the one it does **not** share is `k8s_node_pool_template`.
 
-**`hosts` and `docker` prepare rather than provision.** Neither creates the thing it deploys onto: the machines and the daemon are the operator's, and a teardown removes only what the toolkit installed. The cloud platforms create and destroy their clusters.
+**`hosts`, `docker` and `ocp` prepare rather than provision.** None creates the thing it deploys onto: the machines, the daemon and the OpenShift cluster are the operator's, and a teardown removes only what the toolkit installed. `ocp` is the one where that is least obvious, because it really is a Kubernetes cluster and the manifests are the Kubernetes ones. The cloud platforms create and destroy their clusters.
 
 ## Task catalog
 
@@ -104,16 +104,16 @@ Top level is keyed maps. Instances reference templates/accounts by name; the str
 
 | Key | Purpose | Variants / notes |
 |-----|---------|------------------|
-| `infrastructures` (+ `_accounts`, `_templates`) | cloud k8s env, a set of Linux machines, or a Docker daemon (region, zones) | template platform `gke`/`eks`/`hosts`/`docker`; account provider `gcp`/`aws`/`host`/`docker`. On `docker` the template carries just `docker_network_name` and `docker_host_port_base`, and the account just `docker_context` — the name from `docker context ls`, required rather than defaulted to the active one, because the active context is ambient state and a socket path is a trap (the `default` context's `unix:///var/run/docker.sock` does not exist under Docker Desktop on macOS). On `hosts`, `host_jdk_distribution` is **optional**: empty means no JDK is installed, which is valid only while nothing on those machines needs a JVM — a cluster *or* a `platform: hosts` data generator. Either on a JDK-less infrastructure is rejected at validation, naming the element. Adding a JDK to an infrastructure that had none changes `HostInfrastructurePlugin.preparedMarker` (it folds the JDK identity in with a deliberate `"no-jdk:no-jdk"` literal so the transition is visible), so those machines **re-prepare** and anything already running on them is interrupted. That is supported, not a workaround |
+| `infrastructures` (+ `_accounts`, `_templates`) | cloud k8s env, an existing OpenShift cluster, a set of Linux machines, or a Docker daemon (region, zones) | template platform `gke`/`eks`/`hosts`/`docker`/`ocp`; account provider `gcp`/`aws`/`host`/`docker`/`ocp`. On `ocp` the template carries just `ocp_storage_class` — the name of a StorageClass that **already exists** (`oc get storageclass`), because nothing is created here — and the account just `ocp_context`, the name from `oc config get-contexts`, required for the same reason `docker_context` is and one more that has actually happened: the current context is shared with every Kubernetes tool on the machine, so a `gcloud container clusters get-credentials` run half an hour earlier makes `oc` answer about a GKE cluster. On `docker` the template carries just `docker_network_name` and `docker_host_port_base`, and the account just `docker_context` — the name from `docker context ls`, required rather than defaulted to the active one, because the active context is ambient state and a socket path is a trap (the `default` context's `unix:///var/run/docker.sock` does not exist under Docker Desktop on macOS). On `hosts`, `host_jdk_distribution` is **optional**: empty means no JDK is installed, which is valid only while nothing on those machines needs a JVM — a cluster *or* a `platform: hosts` data generator. Either on a JDK-less infrastructure is rejected at validation, naming the element. Adding a JDK to an infrastructure that had none changes `HostInfrastructurePlugin.preparedMarker` (it folds the JDK identity in with a deliberate `"no-jdk:no-jdk"` literal so the transition is visible), so those machines **re-prepare** and anything already running on them is interrupted. That is supported, not a workaround |
 | `hosts` | one pre-existing machine in a `hosts` infrastructure | points **up** at its `infrastructure`; declares `zone`, `architecture`, `os_family`, and **three** addresses — `ssh_address` (how the controller reaches it), `advertised_address` (what a thin client dials), `bind_address` (what the JVM binds). Collapsing them works on a laptop VM and fails on a multi-NIC lab machine |
 | `distributions` | archives installed on machines | `type: gridgain` / `jdk` / `prometheus` / `grafana` / `otel-collector` / `node-exporter` / `data-generator` / `kafka`. The observability four are static Go binaries and need no JVM; `data-generator` is the exception that does, which is why an infrastructure hosting one needs a `host_jdk_distribution` even if it hosts no cluster. `data-generator` additionally requires `gridgain_major_version` (matched against the target cluster's, so a generator cannot be pointed at a cluster its thin client cannot speak to) and `launcher_name` — the script in the archive's `bin/`, invoked rather than reassembled as a `java -cp` line, because the generator's own build bakes the GG8 `--add-opens` flags into it. `otel-collector` and `node-exporter` additionally require `binary_name`, because upstream publishes `otelcol`, `otelcol-contrib` and `otelcol-k8s` and only the config knows which was downloaded. **`node-exporter` is the per-machine metrics agent**, and unlike the other three it is named by an *infrastructure* (`host_metrics_distribution`) rather than by a monitor: what it measures — the host's CPU, memory, disk and network — belongs to the machine. Note its tarball's root directory embeds the architecture (`node_exporter-1.12.1.linux-ppc64le`) while `expected_root_entry` is one per-distribution value, so a mixed-architecture estate needs **two** `distributions` entries, not two artifacts under one. Version floors are enforced at assembly, not by the schema (a `pattern` cannot compare 2.9.0 against a 2.47.0 floor): Prometheus ≥ 2.47.0 for the OTLP receiver, Grafana ≥ 9.0.0, collector ≥ 0.90.0. Common to every type: `artifacts` keyed by architecture with a `source` that is a `url` (host pulls), a `file` (controller pushes), or an `image` (controller pulls the named `images` entry, extracts `path_in_image`, pushes the result) — no fallback between them. `sha256` lives **inside** the `source`, not beside it: it is required for `url`/`file` and absent for `image`, whose archive does not exist until the controller builds it, so the checksum is computed after extraction. Verification always happens on the machine after transfer. A missing architecture is an error, never substituted; declare `any` for an arch-independent archive. An `image` source may also carry `exclude: [<relative path>…]` to leave directories out of the built archive — every byte is transferred to every machine |
-| `node_pool_templates` | hardware specs | `gke` / `eks` only — neither a `hosts` nor a `docker` infrastructure has node pools |
-| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on k8s; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG9 only** on `docker`, via `docker_image` (a GG8 image is refused by name at plugin selection). On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
+| `node_pool_templates` | hardware specs | `gke` / `eks` only — a `hosts`, `docker` or `ocp` infrastructure has no node pool the toolkit owns. On `ocp` the machines were sized by whoever installed the cluster, which is why `k8s_node_pool_template` is asked for on the two cloud branches and not on the shared Kubernetes one |
+| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on `gke`/`eks`; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG9 only** on `docker`, via `docker_image` (a GG8 image is refused by name at plugin selection); **GG9 only** on `ocp`, via the shared `image` (a GG8 image is refused during validation — the v8 manifests mount four PVCs and have never been measured against an SCC). An `ocp` template is the `gke`/`eks` field set minus `k8s_node_pool_template`; the cluster entry takes the same `k8s_namespace`/`k8s_service_name`, because an OpenShift project is a Namespace. On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
 | `databases` | non-GG DB | `postgres` / `mariadb` (image, port, databaseName, authSecretRef, initDdlLocation, resources, storage) |
 | `cdc_connectors` | Debezium + Kafka pipeline (source: a `databases`; sink: a `clusters`) | `kafka`, `kafka_connect` (`plugins[]`, `jvm_opts[]`), `debezium`, top-level `connectors[]` (extra Connect registrations w/ `__PLACEHOLDER__`→secret) |
 | `secrets` | k8s Secret the toolkit materializes at deploy time, and the payload the `hosts` platform reads on the controller | payload from a pluggable `source` (v1: `kind: sops` — a SOPS-encrypted YAML file + a top-level `path` key). **`source.file` resolves against the demo config's own directory**, like `gridgain8_license_file` and the generator's paths — so with the config at `src/main/resources/demo-config.yaml`, `file: secrets/x.sops.yaml` means `src/main/resources/secrets/x.sops.yaml`, not a `secrets/` at the repo root. Referenced **by name** from the `*_secret_ref` fields below |
-| `data_generators` | streaming data generator as a first-class element | **Not available on `docker`** in this release; drive a Docker cluster from a local run against its published loopback endpoints instead. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
-| `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker`** in this release — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
+| `data_generators` | streaming data generator as a first-class element | **Not available on `docker` or `ocp`** in this release; drive a Docker cluster from a local run against its published loopback endpoints instead. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
+| `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker` or `ocp`** in this release — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
 | `connector_templates` | cluster sidecars / agents | `cloud-connector` (CC) / `otel-collector` (Prom/Grafana) / `ignite-agent` |
 | `dcr_templates` → `dcr_connections` | replication | `gg8` (push) / `gg9` (pull) |
 | `image_registries` → `images` | container images by name | referenced by templates/databases/connectors |
@@ -132,7 +132,7 @@ top-level `secrets:` section. Referencing a Kubernetes Secret created outside th
 externally created, user-owned Secret. In the UI these fields render as dropdowns over the
 `secrets:` section, driven by the `x-source-section` JSONSchema annotation.
 
-**Schema versioning:** `CURRENT_SCHEMA_VERSION` lives in `ConfiguredState.kt` (currently **29** — v29 added the required `k8s_jvm_max_mem`/`k8s_jvm_min_mem` to every Kubernetes cluster template, written at half the template's declared memory limit: the GridGain 9 image hard-codes a 16 GiB heap that the pod's memory limit does not constrain, so a 10Gi pod asked for 16 GiB and was taken by the OOM killer under load. Unlike v27's thread pools this writes a value, because the existing behaviour was harmful rather than merely default — the same reasoning v26 applied to `host_jvm_opts`. v28 introduced the `docker` platform across infrastructure templates, accounts, cluster templates and clusters, writing nothing: every change is additive, so a v27 document is a valid v28 one. v27 introduced the optional `host_thread_pools` block on a hosts cluster template, writing nothing: sizing a pool during an upgrade would change every cluster's throughput and latency invisibly. v26 added the required `host_jvm_opts` to every `platform: hosts` data generator, written as `-Xms2g -Xmx2g`: with nothing set a generator ran on OpenJ9's defaults (8 MB heap growing to 15.4 GB, 3.9 GB nursery) and paused for close to a second, *inside* the operation latency it reports. v25 added the optional `host_cpus_per_host` on a `platform: hosts` data generator, rewriting no values. v24 added the optional `host_cpus_per_node` on a `platform: hosts` cluster, rewriting no values. v23 added the optional `host_metrics_distribution`/`host_metrics_port` on a hosts infrastructure template and `scrape_targets` on a host monitor, rewriting no values. v22 added the required `host_instances_per_host` to every `platform: hosts` data generator, written as `1` so an upgraded config starts the processes it started before. v21 added an optional `message_brokers` section, rewriting no values. v20 made `platform` required on every `data_generators` entry, derived from its infrastructure, and split the entry into `K8s` and `Host` variants. v19 did the same for `monitors` and moved the Kubernetes-only fields of a `prometheus-grafana` monitor into its platform branch. v18 added `hosts`/`distributions` and did the same for `clusters`). Breaking config changes bump it + add a `MigrateVNtoVN+1` in `ConfigMigration.kt`'s runner list + update JSONSchema + add a `ConfigMigrationTest` case. Configs auto-migrate forward before validation.
+**Schema versioning:** `CURRENT_SCHEMA_VERSION` lives in `ConfiguredState.kt` (currently **30** — v30 opened the `ocp` platform across infrastructure templates, accounts, cluster templates and clusters, writing nothing: every change is additive, so a v29 document is a valid v30 one. The bump is for the affordance rather than the data — that number is how the wizard and the UI learn `ocp` is an option, and shipping a platform as an accepted value before it works puts a dead option in front of a reader. v29 added the required `k8s_jvm_max_mem`/`k8s_jvm_min_mem` to every Kubernetes cluster template, written at half the template's declared memory limit: the GridGain 9 image hard-codes a 16 GiB heap that the pod's memory limit does not constrain, so a 10Gi pod asked for 16 GiB and was taken by the OOM killer under load. Unlike v27's thread pools this writes a value, because the existing behaviour was harmful rather than merely default — the same reasoning v26 applied to `host_jvm_opts`. v28 introduced the `docker` platform across infrastructure templates, accounts, cluster templates and clusters, writing nothing: every change is additive, so a v27 document is a valid v28 one. v27 introduced the optional `host_thread_pools` block on a hosts cluster template, writing nothing: sizing a pool during an upgrade would change every cluster's throughput and latency invisibly. v26 added the required `host_jvm_opts` to every `platform: hosts` data generator, written as `-Xms2g -Xmx2g`: with nothing set a generator ran on OpenJ9's defaults (8 MB heap growing to 15.4 GB, 3.9 GB nursery) and paused for close to a second, *inside* the operation latency it reports. v25 added the optional `host_cpus_per_host` on a `platform: hosts` data generator, rewriting no values. v24 added the optional `host_cpus_per_node` on a `platform: hosts` cluster, rewriting no values. v23 added the optional `host_metrics_distribution`/`host_metrics_port` on a hosts infrastructure template and `scrape_targets` on a host monitor, rewriting no values. v22 added the required `host_instances_per_host` to every `platform: hosts` data generator, written as `1` so an upgraded config starts the processes it started before. v21 added an optional `message_brokers` section, rewriting no values. v20 made `platform` required on every `data_generators` entry, derived from its infrastructure, and split the entry into `K8s` and `Host` variants. v19 did the same for `monitors` and moved the Kubernetes-only fields of a `prometheus-grafana` monitor into its platform branch. v18 added `hosts`/`distributions` and did the same for `clusters`). Breaking config changes bump it + add a `MigrateVNtoVN+1` in `ConfigMigration.kt`'s runner list + update JSONSchema + add a `ConfigMigrationTest` case. Configs auto-migrate forward before validation.
 
 ⚠️ **Migration rewrites the user's config file in place through SnakeYAML, which discards every comment in it.** Back the file up before running any task against a config below `CURRENT_SCHEMA_VERSION`, and be aware that a hand-maintained (especially gitignored) config loses its entire rationale on first migration. Hand-bumping `schema_version` is equivalent *only* when the config already states everything the migration would inject.
 
@@ -575,6 +575,107 @@ the management API **answers** (any HTTP status, including the `409` GridGain 9 
 each cycle, so a node that exits mid-wait fails immediately with its status rather than running to
 the timeout.
 
+## The `ocp` platform
+
+A GridGain 9 cluster on an OpenShift cluster **you already have**. The manifests are the ordinary
+Kubernetes ones — the same `templates/k8s/cluster/v9/` files `gke` and `eks` render — and everything
+that differs follows from not owning the cluster.
+
+### Attach, never provision
+
+Nothing creates, sizes or destroys the OpenShift cluster. `deployInfrastructure` checks that the
+named kubeconfig context reaches a live API server and records which one; `teardownInfrastructure`
+forgets the record and leaves the cluster running. Creating an OpenShift cluster is `rosa create
+cluster`, `openshift-install` or `crc start` — three unrelated tools with three unrelated credential
+models — and attaching is the one behaviour common to all three.
+
+The toolkit also never runs `oc login`. Sign in yourself, then name the context that login created.
+
+### Minimum configuration
+
+```yaml
+infrastructure_accounts:
+  openshift-local:
+    provider: ocp
+    ocp_context: crc-admin          # `oc config get-contexts`, NAME column
+
+infrastructure_templates:
+  openshift:
+    platform: ocp
+    ocp_storage_class: crc-csi-hostpath-provisioner   # `oc get storageclass`; 'gp3-csi' on ROSA
+
+infrastructures:
+  openshift-primary:
+    template: openshift
+    account: openshift-local
+    region: laptop                  # a locality label; nothing is looked up from it
+    zones: [local]
+    zone_spread: SINGLE
+```
+
+The cluster template is the `gke`/`eks` field set **minus `k8s_node_pool_template`**, and the cluster
+entry is the ordinary `k8s_namespace`/`k8s_service_name` pair. A complete working file is
+`gridgain-demo-toolkit-dev/src/main/resources/demo-config-ocp.yaml`.
+
+### `restricted-v2`, which is the whole of the difference
+
+OpenShift's default SCC gives each pod an arbitrary UID and fsGroup from the project's own range and
+**refuses any the manifest names**. Measured on 4.22.14:
+
+| Manifest asks for | Verdict |
+|---|---|
+| `runAsUser: 0` | rejected — *"must be in the ranges: [1000660000, 1000669999]"* |
+| `fsGroup: 1001` (what `gke`/`eks` correctly render) | rejected — *"1001 is not an allowed group"* |
+| neither | admitted; runs as `uid=1000660000 gid=0(root)` |
+
+The second line is the one that catches people: hard-coding the image's own GID is the obvious fix
+for volume ownership, it is right on GKE and EKS, and OpenShift refuses it. So this platform renders
+**no** `securityContext` at all, the kubelet chowns the PVC to the fsGroup it assigned
+(`drwxrwsr-x root:1000660000`), and the GridGain 9 image is happy because its work directory is
+group-writable.
+
+Two consequences worth knowing:
+
+- **Anything that needs to write must be given somewhere to write.** The init Job has no PVC, and
+  the GridGain 9 CLI writes a logging lock file in its working directory and its own config under
+  `$HOME` before it does any work. Under an arbitrary UID `$HOME` is `/`, and the job dies in
+  Micronaut startup with `Couldn't create default config` — which names nothing about permissions.
+  It is given an `emptyDir` home (mode 0777, so writable by whatever UID arrives).
+- **Pod anti-affinity is `preferred`, not `required`.** An attached cluster may have fewer machines
+  than your GridGain cluster has nodes — OpenShift Local is a single node — and a required rule
+  leaves every replica after the first Pending forever.
+
+### No StorageClass, no LoadBalancer, no node pool
+
+`gke`/`eks` create a `gg-<cluster>` StorageClass naming their cloud's CSI provisioner. Here the class
+is named in configuration and nothing creates it: the provisioner depends on how the cluster was
+installed, and creating a cluster-scoped object usually needs a privilege an ordinary project user
+has not got. **Nothing deletes it either** — it is very likely the cluster's default, and removing it
+would unbind every other workload on that cluster.
+
+`demo_access` has no counterpart: OpenShift's answer to external access is a Route, and a cluster
+with no cloud load-balancer integration would leave a Service pending forever. Reach the cluster with
+`oc port-forward` instead.
+
+### Teardown leaves PVs behind if the class says `Retain`
+
+`teardownCluster` deletes the PVCs it created (unless `retain_on_cluster_destroy`), and the PV
+lifecycle then belongs to the storage class. A class with `reclaimPolicy: Retain` — which
+OpenShift Local's is — leaves them `Released`, holding their data, for the cluster owner to reclaim
+with `oc delete pv`. That is the class's policy, not the toolkit's.
+
+### Out of scope in this release
+
+Monitors, databases, CDC connectors, data generators, message brokers, proxies, DCR and GridGain 8.
+Each is refused **during validation** with a message naming the way out, not at deploy time.
+
+### The wizard does not scaffold this platform
+
+`-Pwizard.platform=ocp` is refused by name. Unlike `docker`, this platform *has* an account, a region
+and a disk class — they just belong to whoever built the cluster, and the one thing the interview
+would need, the kubeconfig context, cannot be discovered or guessed. See
+`WizardIntent.SCAFFOLDABLE_PLATFORMS`.
+
 ## Generator dispatch (`dataGenerate`)
 
 The plugin runs the data generator from `ops.yaml`/`data.yaml` (see the `gridgain-demo-data-generator` skill for those files) in one of **three modes**, `--mode=local` / `in-cluster` / `hosts`.
@@ -1004,6 +1105,13 @@ schema_version bump.
   `docker_jvm_max_mem`, and Kubernetes via `k8s_jvm_max_mem` (v29 — consumed by GridGain 9 only,
   since GridGain 8's image defaults to a harmless `-Xmx1g`). `ClusterSpecAssembler` warns when the
   heap meets the container limit, or takes more than 75% of it.
+- **A heap is `5g`, never `5Gi` — and the two sit four lines apart in a cluster template.** The
+  value becomes the JVM's `-Xmx` argument verbatim, and the JVM does not speak Kubernetes
+  quantities: a node handed `-Xmx5Gi` exits with `Invalid maximum heap size` before it logs
+  anything a reader could trace back to a config line, so what you see is a crash-looping pod and
+  no cause. `resources.limits.memory` *is* a Kubernetes quantity and `5Gi` is right there. The
+  schema now constrains every `*_jvm_max_mem`/`*_jvm_min_mem` to `^[1-9][0-9]*[kKmMgG]?$`, so this
+  is a validation error rather than a crash loop. (`2G` is accepted: the JVM reads it as 2 GiB.)
 - **`data_storage.size` means different things per platform.** On `hosts` it sizes GridGain 9's
   off-heap data region; on Kubernetes it sizes the **PVC**, and the v9 region sizes are hard-coded
   constants in `templates/k8s/cluster/v9/gridgain-config.conf`. A memory check that added the k8s
@@ -1019,6 +1127,7 @@ schema_version bump.
 - JDK provision: `…/core/specs/HostJdkProvision.kt`
 - `hosts` platform: `…/core/infrastructure/HostInfrastructurePlugin.kt`, `HostGridGainV8ClusterPlugin.kt`, `HostStepBuilder.kt`, `HostResolvers.kt`, `…/core/deployment/HostClusterDeployer.kt`, `HostClusterDestroyer.kt`, `HostInfrastructureForceDestroyer.kt`, `HostLogDiagnostics.kt`, `…/core/command/SshCliExecutor.kt`, `src/main/resources/templates/hosts/**`
 - `docker` platform: `…/core/infrastructure/DockerInfrastructurePlugin.kt`, `DockerGridGainV9ClusterPlugin.kt`, `DockerStepBuilder.kt`, `DockerResolvers.kt`, `…/core/effect/DockerEffect.kt`, `…/core/recording/DockerClusterTemplateModel.kt`, `…/core/specs/InfrastructureSpec.kt` (`ContainerBase`, `DockerInfrastructureSpec`), `…/core/specs/ClusterSpec.kt` (`ContainerClusterBase`, `DockerGridGainClusterSpec`), `…/core/state/DeployedDockerInfrastructure` + `DeployedDockerCluster`, `src/main/resources/templates/docker/**`, `src/main/resources/tooling/docker_tool_requirements.yaml`
+- `ocp` platform: `…/core/infrastructure/OcpInfrastructurePlugin.kt`, `OcpGridGainV9ClusterPlugin.kt`, `OcpResolvers.kt`, `K8sStepBuilder.kt` (the `oc` binary and the `--context` flag are its two constructor seams), `…/core/specs/InfrastructureSpec.kt` (`OcpInfrastructureSpec`), `…/core/specs/ClusterSpec.kt` (`K8sApiClusterSpec`, `OcpClusterSpec`), `…/core/configuration/InfrastructureSpecAssembler.kt` (`OcpInfrastructureSpecAssembler`), `ClusterSpecAssembler.kt` (`OcpClusterSpecAssembler`), `…/core/recording/ClusterTemplateModel.kt` (`Platform.OPENSHIFT` renders no fsGroup), `…/core/state/DeployedOcpInfrastructure` + `DeployedOcpCluster`, `src/main/resources/tooling/ocp_tool_requirements.yaml`
 - endpoints contract: `src/main/resources/schema/client-endpoints.schema.json`, `…/core/infrastructure/ClientEndpointsWriter.kt`, `…/core/actions/ClusterEndpointPublisher.kt`
 - message broker: `…/core/configuration/MessageBrokerSpecAssembler.kt`, `…/core/specs/MessageBrokerSpec.kt`, `…/core/infrastructure/HostMessageBrokerPlugin.kt`, `…/core/deployment/HostMessageBrokerDeployer.kt` + `HostMessageBrokerDestroyer.kt`, `…/core/state/DeployedMessageBrokerState.kt`, `src/main/resources/schema/message-broker.schema.json`
 - broker endpoints contract: `src/main/resources/schema/broker-endpoints.schema.json`, `…/core/infrastructure/BrokerEndpointsWriter.kt`, `…/core/actions/MessageBrokerEndpointPublisher.kt` (shared atomic write: `…/core/infrastructure/AtomicEndpointsFileWrite.kt`)
