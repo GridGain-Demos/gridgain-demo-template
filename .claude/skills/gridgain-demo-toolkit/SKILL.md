@@ -670,6 +670,19 @@ with `oc delete pv`. That is the class's policy, not the toolkit's.
 Monitors, databases, CDC connectors, data generators, message brokers, proxies, DCR and GridGain 8.
 Each is refused **during validation** with a message naming the way out, not at deploy time.
 
+The manifest-level blocker is gone: `prometheus-statefulset.yaml` and `kafka-statefulset.yaml` no
+longer pin a UID, and both were measured under `restricted-v2`. What each image needs differs, and
+the difference is worth knowing before anyone offers these elements here:
+
+| Image | Under an arbitrary UID |
+|---|---|
+| `prom/prometheus` | works once the pin is gone — TSDB starts, volume group-writable |
+| `grafana/grafana` | works, needed nothing |
+| `apache/kafka` | needs **more** than the pin gone: it ships `/opt/kafka/config` and `/opt/kafka/logs` owned by uid 1000 rather than group-0-writable, and its entrypoint writes to both. An init container seeds the config into an emptyDir mounted over it, and a second emptyDir shadows the log directory |
+
+That is the general shape of the remaining OpenShift work: the manifests are the easy half, and
+whether a third-party image tolerates an arbitrary UID has to be measured image by image.
+
 ### The wizard does not scaffold this platform
 
 `-Pwizard.platform=ocp` is refused by name. Unlike `docker`, this platform *has* an account, a region
