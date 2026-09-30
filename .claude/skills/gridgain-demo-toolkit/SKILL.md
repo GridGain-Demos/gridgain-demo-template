@@ -702,9 +702,11 @@ platforms — and is why a proxy targeting an `ocp` monitor is refused rather th
 `deployClusterMonitoring -PclusterName=<c> -PmonitorName=<m>` deploys the collector; **both** names
 are required.
 
-**Control Center is not offered.** Its images have not been measured under `restricted-v2` — and
-that is the whole of the reason. Each third-party image has to be run under an arbitrary UID before
-it is offered here, and `gridgain/control-center-backend` and `-frontend` have not been.
+**Control Center is not offered yet, but the images are no longer the obstacle.** Both were measured
+under `restricted-v2` on 4.22.14 at tag `2026.1`, and both passed with **no accommodation at all** —
+see the image table below. What remains is the toolkit's own work: the spec/assembler/plugin triad,
+a Route for the frontend, and the per-cluster connector (`cloud-connector` for GridGain 9,
+`ignite-agent` for GridGain 8).
 
 (The toolkit's own pinned default is current: `standard-images.yaml` has carried `2026.1` since
 commit `c49592eb`, which is still the newest published release of both images. A demo config written
@@ -725,6 +727,9 @@ the difference is worth knowing before anyone offers these elements here:
 | `prom/prometheus` | works once the pin is gone — TSDB starts, volume group-writable |
 | `grafana/grafana` | works, needed nothing |
 | `apache/kafka` | needs **more** than the pin gone: it ships `/opt/kafka/config` and `/opt/kafka/logs` owned by uid 1000 rather than group-0-writable, and its entrypoint writes to both. An init container seeds the config into an emptyDir mounted over it, and a second emptyDir shadows the log directory |
+| `gridgain/ultimate` | works — `/opt/gridgain/work` ships `drwxrwxrwx`, and `control.sh` runs under the assigned UID |
+| `gridgain/control-center-backend` | works, and the image is actively OpenShift-aware: it **generates an `/etc/passwd` entry for the assigned UID**. Started, created its admin account, served its API |
+| `gridgain/control-center-frontend` | works. nginx's pid and both temp paths are already redirected to `/tmp`, so `/var/cache/nginx` being unwritable never bites — proxying and large-body buffering both verified |
 
 That is the general shape of the remaining OpenShift work: the manifests are the easy half, and
 whether a third-party image tolerates an arbitrary UID has to be measured image by image.
