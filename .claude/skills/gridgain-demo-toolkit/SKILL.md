@@ -5,7 +5,7 @@ description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) 
 
 # GridGain Demo Toolkit — Usage
 
-*Last updated: 2026-09-29*
+*Last updated: 2026-09-30*
 
 The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target-demo project consumes it via `includeBuild`/`mavenLocal` and invokes its Gradle tasks; demo projects must not add bespoke tasks. This skill is the usage map: tasks, the config model, and gotchas. For the **data generator's own config surface** (ops.yaml/data.yaml, rate kinds, transaction_scope, distribution), see the `gridgain-demo-data-generator` skill — this skill only covers how the plugin *dispatches* it.
 
@@ -113,7 +113,7 @@ Top level is keyed maps. Instances reference templates/accounts by name; the str
 | `cdc_connectors` | Debezium + Kafka pipeline (source: a `databases`; sink: a `clusters`) | `kafka`, `kafka_connect` (`plugins[]`, `jvm_opts[]`), `debezium`, top-level `connectors[]` (extra Connect registrations w/ `__PLACEHOLDER__`→secret) |
 | `secrets` | k8s Secret the toolkit materializes at deploy time, and the payload the `hosts` platform reads on the controller | payload from a pluggable `source` (v1: `kind: sops` — a SOPS-encrypted YAML file + a top-level `path` key). **`source.file` resolves against the demo config's own directory**, like `gridgain8_license_file` and the generator's paths — so with the config at `src/main/resources/demo-config.yaml`, `file: secrets/x.sops.yaml` means `src/main/resources/secrets/x.sops.yaml`, not a `secrets/` at the repo root. Referenced **by name** from the `*_secret_ref` fields below |
 | `data_generators` | streaming data generator as a first-class element | **Not available on `docker` or `ocp`** in this release; drive a Docker cluster from a local run against its published loopback endpoints instead. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
-| `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker` or `ocp`** in this release — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
+| `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker`**; on `ocp` only `prometheus-grafana` (see §The `ocp` platform) — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
 | `connector_templates` | cluster sidecars / agents | `cloud-connector` (CC) / `otel-collector` (Prom/Grafana) / `ignite-agent` |
 | `dcr_templates` → `dcr_connections` | replication | `gg8` (push) / `gg9` (pull) |
 | `image_registries` → `images` | container images by name | referenced by templates/databases/connectors |
@@ -681,10 +681,35 @@ them owned by the assigned fsGroup.
 The RBAC is namespaced: a Role and RoleBinding in the demo's own project, which an ordinary project
 admin may create. Nothing here asks for a cluster-scoped grant.
 
+### Monitoring: Prometheus & Grafana, published as a Route
+
+`prometheus-grafana` monitors deploy here, and a cluster binds to one exactly as it does on the
+cloud platforms — through a `connector_templates` entry of type `otel-collector`, which rides beside
+the cluster and forwards its metrics.
+
+The monitor entry is the `gke`/`eks` field set **minus** `k8s_node_pool_template` and the
+`num_nodes`/`min_nodes`/`max_nodes` trio; the connector template likewise drops its node pool. Both
+absences are the same fact: this platform sizes no pools.
+
+**Grafana is reached by a Route, not a LoadBalancer.** A LoadBalancer Service needs the cluster to
+have cloud load-balancer integration, and an attached one may have none — OpenShift Local has none,
+and a Service there stays `Pending` for ever — whereas every OpenShift cluster has an ingress router.
+The manifest names no host, so the ingress operator generates
+`grafana-<namespace>.<cluster ingress domain>`; `deployMonitor` reads it back and prints it. That
+also gives a stable hostname across redeploys, which is what `proxies` provide on the cloud
+platforms — and is why a proxy targeting an `ocp` monitor is refused rather than silently useless.
+
+`deployClusterMonitoring -PclusterName=<c> -PmonitorName=<m>` deploys the collector; **both** names
+are required.
+
+**Control Center is not offered.** Its images have not been measured under `restricted-v2`, and the
+tag the toolkit's own configuration names — `2024.4.0` — no longer exists on Docker Hub, whose
+published tags now start at `2025.x`. Worth fixing on its own terms before it is offered anywhere.
+
 ### Out of scope in this release
 
-Monitors, databases, CDC connectors, data generators, message brokers, proxies and DCR. Each is
-refused **during validation** with a message naming the way out, not at deploy time.
+Control Center, databases, CDC connectors, data generators, message brokers, proxies and DCR. Each
+is refused **during validation** with a message naming the way out, not at deploy time.
 
 The manifest-level blocker is gone: `prometheus-statefulset.yaml` and `kafka-statefulset.yaml` no
 longer pin a UID, and both were measured under `restricted-v2`. What each image needs differs, and
