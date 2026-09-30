@@ -702,9 +702,14 @@ platforms — and is why a proxy targeting an `ocp` monitor is refused rather th
 `deployClusterMonitoring -PclusterName=<c> -PmonitorName=<m>` deploys the collector; **both** names
 are required.
 
-**Control Center is not offered.** Its images have not been measured under `restricted-v2`, and the
-tag the toolkit's own configuration names — `2024.4.0` — no longer exists on Docker Hub, whose
-published tags now start at `2025.x`. Worth fixing on its own terms before it is offered anywhere.
+**Control Center is not offered.** Its images have not been measured under `restricted-v2` — and
+that is the whole of the reason. Each third-party image has to be run under an arbitrary UID before
+it is offered here, and `gridgain/control-center-backend` and `-frontend` have not been.
+
+(The toolkit's own pinned default is current: `standard-images.yaml` has carried `2026.1` since
+commit `c49592eb`, which is still the newest published release of both images. A demo config written
+before that may name `2024.4.0`, which Docker Hub carries for neither — the symptom is
+`ImagePullBackOff` until the readiness budget runs out.)
 
 ### Out of scope in this release
 
