@@ -5,7 +5,7 @@ description: How to USE the GridGain Demo Toolkit (gridgain-demo-gradle-plugin) 
 
 # GridGain Demo Toolkit — Usage
 
-*Last updated: 2026-09-30*
+*Last updated: 2026-10-02*
 
 The toolkit is the `gridgain-demo-gradle-plugin` (the primary product). A target-demo project consumes it via `includeBuild`/`mavenLocal` and invokes its Gradle tasks; demo projects must not add bespoke tasks. This skill is the usage map: tasks, the config model, and gotchas. For the **data generator's own config surface** (ops.yaml/data.yaml, rate kinds, transaction_scope, distribution), see the `gridgain-demo-data-generator` skill — this skill only covers how the plugin *dispatches* it.
 
@@ -414,6 +414,63 @@ with no GG9 series left unlabelled. Values are the source names you see in
 ⚠️ **`transform` requires a contrib (or k8s) collector build**, not core `otelcol`. The hosts deploy
 runs `otelcol validate` against the rendered config before starting the unit, so a core build fails
 immediately and says so instead of timing out a readiness probe.
+
+### ⚠️ Benchmarking GG9 on hosts: what the template does NOT give you
+
+The `power-gg9`-shaped template is sized for a demo. Measured 2026-10-06 against 9.1.21 on the Power
+lab, these are the things that silently make a GG9 measurement meaningless — three of the four are
+invisible at deploy time.
+
+**`resources.data_storage.size` sizes the aipersist PAGE CACHE.** A template carrying `8Gi` gives the
+engine an 8 GiB page cache; verify with
+`GET /management/v1/configuration/node/ignite.storage.profiles` and read `sizeBytes` back. An
+undersized cache reads as a throughput ceiling that is really page thrashing. Match whatever the GG8
+cluster you are comparing against uses for its data region.
+
+**`host_jvm_opts` ships a demo heap** (`-Xms3g -Xmx3g` on the shape above) against GG8's 8g. Not a
+bug, but not a comparison either.
+
+**There is NO thread-pool surface for GG9.** `host_thread_pools` is GridGain 8 only — the assembler
+*rejects* a non-zero value on a GG9 cluster rather than ignoring it — and nothing replaces it. Every
+GG9 pool is therefore auto-sized from `Runtime.availableProcessors()`, the same miscount that costs
+GG8 3.66x at 384 in flight on an SMT machine. Measured: **1,212 threads on 8 physical cores (152 per
+core)**, against the 638 (80 per core) that GG8's unfixed defaults produced. Changing one means
+hand-editing `conf/gridgain-config.conf` on every node (`ignite.raft.disruptor.stripes` and friends);
+closing the gap properly is the GG9 analogue of `host_thread_pools`.
+
+**The generator's zone DDL carries no `REPLICAS`.** `Gg9SqlDdlRenderer` emits
+`CREATE ZONE IF NOT EXISTS gg_demo_zone WITH STORAGE_PROFILES = 'default';`, so GG9 defaults the zone
+to **replicas 1, quorum 1** — no replication at all. Comparing that against a GG8 cluster running
+`backups=1` + `FULL_SYNC` is not like-for-like. Because the DDL is `IF NOT EXISTS`, pre-creating the
+zone fixes it with no code change:
+
+```sql
+CREATE ZONE gg_demo_zone WITH STORAGE_PROFILES = 'default', REPLICAS = 2, QUORUM_SIZE = 2, PARTITIONS = 256;
+```
+
+⚠️ **`REPLICAS = 2` alone is NOT the `FULL_SYNC` equivalent.** GG9 exposes quorum separately —
+`system.zones` has a `ZONE_QUORUM_SIZE` column, which reads **1** by default — so a write can commit
+on one copy. Set `QUORUM_SIZE` explicitly and read it back from `system.zones`; do not rely on the
+Raft majority rule to supply it. (Counter-intuitively, replicas=2 measured *faster* than replicas=1
+on this hardware, and more than doubled server CPU.)
+
+**Operating GG9's config, three traps in the order they bite:**
+
+1. **Flat HOCON silently no-ops.** `--data 'ignite.raft.disruptor.stripes=8'` returns **HTTP 200** and
+   changes nothing. The nested form works:
+   `--data 'ignite { raft { disruptor { stripes : 8 } } }'`. Always read the value back; the status
+   code proves nothing.
+2. **REST changes revert on restart**, for the reason the GG9-on-hosts section already gives — the node
+   runs on a writable copy refreshed from the placed artifact every start. Persistent changes belong in
+   `conf/gridgain-config.conf`.
+3. **No SQL over REST and no CLI.** `POST /management/v1/sql` 404s and the distribution has no `bin/`,
+   so DDL and resets go through the thin-client jar (the data generator ships one).
+
+⚠️ **`-Xverbosegclog` in `host_jvm_opts` is OpenJ9-only.** On Temurin the JVM refuses to start —
+`Unrecognized option` — and the generator or node dies at launch. The reverse of the `-XX:+UseG1GC`
+trap noted above: check which JDK the element actually resolves before copying GC flags between
+architectures.
+
 
 ### Bundled dashboards
 
@@ -952,6 +1009,69 @@ authoritative list of what *is* public is `src/main/resources/standard-images.ya
 Ultimate, GridGain 9, Control Center backend/frontend, and Kafka. Anything not in that file has to
 be built and pushed.
 
+## ⚠️ NIC segmentation offload destroys a `hosts` cluster, invisibly
+
+**`deployInfrastructure` installs `gridgain-nic-offload-<infra>.service`**, a oneshot unit that runs
+`ethtool -K <iface> tso off gso off gro off` on every non-loopback interface, before `basic.target`.
+`ethtool` is in the hosts tool manifest, so preflight fails early on a machine without it.
+
+**Controlled by `host_tuning.nic_offload`** (`disable` | `leave`, default `disable`). It is a
+separate key from `host_tuning.enabled` on purpose — see *Which way to set it* below, because the
+right answer depends on the NIC and both wrong answers are silent.
+
+**Why it exists.** On the IBM Power lab (`ibmveth`, PowerVM's virtual ethernet) leaving offload on
+took a two-node GridGain 8 cluster from **173,094 ops/s to 30** — and it cost days to find, because
+every conventional check exonerated the network:
+
+| check | result |
+|---|---|
+| flood ping, 5,000 × 1400 B | **0% loss, 0.019 ms** |
+| raw TCP, same two hosts, GridGain's own port 47100, 8 streams | **86,957 req/resp per second, 0 retransmits** |
+| two GridGain nodes on **one** machine (loopback) | **8,333 ops/s** |
+| two GridGain nodes on **two** machines | **7 ops/s** |
+
+Small discrete messages never build a segment large enough to engage offload, so ping, SSH and a
+hand-written TCP probe all pass. **GridGain batches messages into large writes**, which is exactly
+what the offload path acts on. The damage surfaces as TCP retransmission with exponential backoff —
+latency tails at 220 ms, 440 ms, 880 ms, 2.2 s — with both servers at **0.00 load**, every
+`sys-stripe` thread parked, and no lock contention anywhere.
+
+**Three things that make this expensive to diagnose if you meet it again:**
+- A reinstall does not fix it, and **neither does a reboot** — offload is a driver default.
+- `pgrep -f` and cumulative `/proc/net/snmp` counters both mislead here. The counters include any
+  SSH or `scp` you ran over a VPN; isolate a window, and prefer the **topology line**
+  (`servers=N, clients=N`) over process greps for "is the estate quiet".
+- The one-node-vs-two-node comparison is the cheapest discriminator. If one node scales and two do
+  not, stop testing the network and look at what only happens between machines.
+
+⚠️ **Never toggle offload under a running cluster.** It briefly reconfigures the interface, which
+drops the discovery heartbeat; a node then logs `FailureContext [type=SEGMENTATION]` and stops
+itself. The unit is `enable`d without `--now` for exactly this reason — it takes effect from the
+next boot, and `deployInfrastructure` precedes `deployCluster` anyway.
+
+### Which way to set `nic_offload`
+
+| NIC | Set it to | Why |
+|---|---|---|
+| `ibmveth` (PowerVM virtual ethernet) | `disable` | the case above — the hypervisor mishandles GridGain's batched writes |
+| AWS **ENA** (any EC2 instance) | `leave` | offload is how ENA reaches its rated throughput; disabling it raises CPU per byte and caps bandwidth |
+| anything else, unmeasured | `disable` | the safe default: a throughput ceiling is cheaper than a cluster that does 30 ops/s |
+
+⚠️ **`leave` is not "don't tune".** It leaves the NIC alone and still applies the sysctl drop-ins,
+the limits and the hugepage mode. Reaching for `host_tuning.enabled: false` to spare the NIC throws
+away `nofile`, `max_map_count` and `somaxconn` as well, which GridGain genuinely needs — that
+all-or-nothing trade is why the key was split out.
+
+⚠️ **Both wrong answers are invisible.** Ping, SSH and a hand-written TCP probe pass either way, so
+neither mis-setting reports an error anywhere; it just produces throughput numbers that are quietly
+wrong. When comparing platforms, check the setting before you trust the comparison —
+`ethtool -k <iface> | grep -E 'tcp-segmentation|generic-'` on the machine is the ground truth.
+
+**Changing it on a prepared estate works.** Flipping the value changes the prepared marker, so the
+machines re-prepare, and `tuning.sh apply` removes the unit when it is no longer staged rather than
+leaving it behind. Like installing it, removal is not `--now`: the restored default takes effect at
+the next boot, because stopping the unit would reconfigure the interface under a running cluster.
+
 ## ⚠️ `host_cpus_per_node` is a throughput knob, not just a licence knob
 
 Capping a GG8 cluster's CPUs moves `Runtime.availableProcessors()`, and Ignite
@@ -985,9 +1105,130 @@ Ignite's default. `client_connector` is the one that sets the ceiling:
 cluster_templates:
   power-gg8:
     host_thread_pools:
-      client_connector: 256   # ClientConnectorConfiguration.threadPoolSize
-      striped: 128            # IgniteConfiguration.stripedPoolSize
+      client_connector: 256   # I/O-bound: size to CONCURRENCY, not to cores
+      striped: 16             # CPU-bound: size to PHYSICAL cores
+      system: 16              # CPU-bound
+      data_streamer: 8        # CPU-bound
 ```
+
+⚠️ **The two kinds of pool want opposite sizing, and on an SMT machine the default gets both
+wrong.** `client_connector` is **I/O-bound**: a request holds its thread across the synchronous
+replica round trip, so it must cover the in-flight concurrency and sizing it to cores caps throughput
+at (threads ÷ latency). Every other pool is **CPU-bound** and should follow *physical* cores — which
+`availableProcessors()` does not report on an SMT machine.
+
+Measured on the Power lab (2 nodes, 8 physical cores each at SMT=8, so 64 logical). Defaults gave
+**638 threads per node on 8 cores — 80 per physical core** (the same defaults give 20 on a 32-core
+Intel instance and 10 on a 64-core Graviton): client-connector 256, NIO 68, data-streamer 64,
+**GC workers 63**, striped 64. Setting `striped: 16`, `system: 16`, `public: 8`, `query: 8`,
+`data_streamer: 8`, `rebalance: 4` plus `-Xgcthreads8` in `host_jvm_opts` took it to 219 threads:
+
+| in flight | default pools | sized to cores | throughput | p99 |
+|---|---|---|---|---|
+| 64 | 174,030 @ 0.87 ms | 191,974 @ 0.77 ms | 1.10x | 1.1x |
+| 128 | 152,437 @ 7.30 ms | 192,482 @ 2.39 ms | 1.26x | 3.0x |
+| 256 | 97,421 @ 45.98 ms | 204,289 @ 10.47 ms | 2.10x | 4.4x |
+| 384 | 57,101 @ 102.53 ms | **209,180 @ 19.24 ms** | **3.66x** | **5.3x** |
+
+The default configuration **peaked at 64 in flight and fell to a third of peak**; sized to cores it
+**rises monotonically with no knee** through 384, and peak throughput is 20% higher. `client_connector`
+was left at 256 throughout — cutting it would have capped below the existing peak.
+
+**The striped pool is the single most valuable key here, and the optimum is ONE THREAD PER PHYSICAL
+CORE.** Swept 2026-10-06 at 384 in flight, PT4M, 2 reps per point, persistence on, every other pool
+held constant:
+
+| `striped` | 50/50 ops/s | 90% writes | p99 (50/50) | vs default |
+|---|---|---|---|---|
+| **8** (= physical cores) | **250,161** | **155,308** | **13.7 ms** | **8.0x** |
+| 16 | 230,580 | 120,772 | 17.5 ms | 7.4x |
+| 32 | 99,080 | 49,408 | 54.3 ms | 3.2x |
+| 64 (`availableProcessors()`) | 31,302 | 13,790 | 144.9 ms | — |
+
+⚠️ **The curve is brutally steep on the wrong side of the optimum** — 8x between the default and the
+best point, and every doubling past 8 roughly halves throughput while multiplying p99. This is not a
+knob to approximate. Size it to *physical* cores, which on an SMT machine is `availableProcessors()`
+divided by the SMT width, not `availableProcessors()`.
+
+⚠️ **Throughput DEGRADES over a long measurement session, so only compare runs taken close together.**
+The same `striped: 16` configuration measured **230,580 ops/s at 14:45 and 193,334 at 17:02** — a 19%
+drift across one afternoon, while reps within a campaign agreed to under 2%. The cause is on-disk
+state: a redeploy restarts the node but does **not** clear the data directory, so `storage` and
+especially `walarchive` accumulate (9.9 GB of WAL archive by the end of that session) and checkpoint
+work grows with them. Disk *space* was never short — 3% of 745 GB.
+
+Consequences for any sweep: redeploying between arms is not enough of a reset; arms must be adjacent
+in time, and a baseline re-measured hours later is a different measurement. In the table above the
+8/32/64 points were taken within 40 minutes of each other and the 8-vs-default 8x is 14 minutes
+apart, so those hold; the `striped: 16` row came from a different campaign, which is why the gap
+between 8 and 16 is quoted as a range (+8.5% to +29%) rather than a number. Clear the data directory,
+or tear the cluster down rather than redeploying it, when a comparison has to span hours.
+
+⚠️ **Sizing the pools removes the collapse, not the ceiling — and the ceiling is the WAL.** Measured
+2026-10-06 on the same cluster with pools already sized, by a controlled 2x2 (384 in flight, PT4M,
+2 reps, the off arm verified on the machine by counting `wal-*` threads):
+
+| 384 in flight | persistence on | persistence off | gain |
+|---|---|---|---|
+| 50/50 | 230,580 | 353,791 | **+53%** |
+| 90% writes | 120,772 | **336,488** | **+179%** |
+| p99 50/50 | 17.5 ms | 2.96 ms | 5.9x |
+| p99 write-heavy | 31.7 ms | 3.08 ms | 10.3x |
+
+🛑 **THE TABLE ABOVE IS NOT A GENERAL RESULT. The WAL was never an independent ceiling.** Both arms
+were measured at `striped: 16`, which the sweep below shows is the wrong pool size. Repeating the
+identical 2x2 at `striped: 8` collapses the effect:
+
+| mix | WAL on | WAL off | gain |
+|---|---|---|---|
+| 50/50 | 240,004 | 333,497 | +39% |
+| **90% writes** | 153,755 | 157,146 | **+2%** |
+
+At `striped: 16` removing the WAL was worth **+179%** on a write-heavy workload. At `striped: 8` it
+is worth **+2%**. The WAL only binds while the striped pool is misconfigured; fix the pool and it
+costs almost nothing on the workload shape that matters. **Do not tune persistence to chase
+throughput** — size the striped pool first and re-measure before concluding anything about the WAL.
+
+The single `wal-write-worker` is still real (one per node, `FileHandleManagerImpl$WALWriter`, no
+setter in `DataStorageConfiguration`), and it is still the busiest thread in a misconfigured cluster.
+That is exactly what made it so convincing, and why it took a second 2x2 at the right pool size to
+show it was a symptom rather than the cause. GridGain 8 runs **one**
+`wal-write-worker` per node (`FileHandleManagerImpl$WALWriter`, a single `GridWorker` loop), it was
+the busiest thread in the JVM at 61% of a core sustained while every wide pool idled, and
+`DataStorageConfiguration` offers **no setter for its count** — only `setWalThreadLocalBufferSize`.
+No pool setting reaches it.
+
+⚠️ `persistence_enabled: false` is a **diagnostic, not a recommendation**. What transfers is the
+ceiling: it binds hardest on write-heavy workloads, which is where a real-time system of record sits.
+At 90% writes the WAL costs ~70% of achievable throughput.
+
+🛑 **BUSIEST THREAD IS NOT THE BOTTLENECK, and CPU% cannot tell you which it is.** This is the most
+expensive mistake available in this codebase: it was made three times in one day, each time on
+evidence that looked conclusive.
+
+| suspect | looked like | what widening/removing it actually did |
+|---|---|---|
+| `wal-write-worker` | 74% of a core, a pool of **one**, no setter | +179% at `striped: 16`, **+2% at `striped: 8`** — a symptom of the wrong pool size |
+| GG9 Netty event loops | 2 of 128 at **84%**, 126 idle | 8x the connections: throughput **−4%**, p99 halved |
+| `grid-nio-worker-tcp-comm-0` | **97%** of a core, 31 siblings at 0.0s cpu | 4 sockets: throughput **−8%**, comm-layer CPU **3.5x** |
+
+A thread near 100% that gains nothing when widened is a thread work is being **queued through**, not
+**limited by**. The only confirmation that counts is removing or widening the suspect and measuring —
+and then re-measuring once the other constraints are fixed, because a bottleneck found while
+something upstream is misconfigured may vanish when that is corrected.
+
+**The diagnostic signature**, so this is recognisable without re-deriving it: `vmstat` shows a large
+run queue against *idle* CPU with `b`=0 and `wa`=0 — 99 runnable threads at ~50% idle, 211k context
+switches/s, on the measured case. More threads ready than cores can dispatch. ⚠️ Do **not** trust
+`node_disk_io_time_seconds_total` to rule storage out here: it read 0.00 throughout while `vmstat`
+showed 58k–164k blocks out.
+
+⚠️ **`grid-nio-worker` (68 threads at SMT=8) is not exposed by `host_thread_pools`** — a gap in
+**this toolkit**, not a GridGain limitation. Verified against `ignite-core-8.9.33-p1.jar`:
+`ClientConnectorConfiguration.setSelectorCount(int)` exists (with `DFLT_SELECTOR_CNT`), so the product
+can size it and the toolkit simply does not render it. It is the largest remaining auto-sized pool.
+It was **not** a bottleneck when measured — the busiest `grid-nio-worker` ran at 1.8% of a core over
+a 5,956s sample — so close the gap for completeness, not in the expectation of throughput.
 
 Also accepts `public`, `system`, `query`, `data_streamer`, `rebalance`. Each has
 `minimum: 1` so 0 is unreachable from a file and can only mean absent — a
@@ -1000,6 +1241,72 @@ beans have a property called `threadPoolSize`, and Spring accepts it on either.
 ⚠️ These are **not** reachable through `host_jvm_opts` — they are Spring bean
 properties with no `IGNITE_*` system-property equivalent, which is why they
 needed a config surface of their own.
+
+## ⚠️ Deep CPU idle states cost more than they save (x86 `hosts`)
+
+On an x86 machine whose cores are allowed to enter deep idle states, **every operation can pay a
+wakeup**, because a GridGain request chains several dependent handoffs between threads and machines.
+The cost lands on the *tail* of each handoff rather than its median, which is why it is invisible in
+an average and severe in p99.
+
+Measured on AWS `m8id.16xlarge` (Xeon 6975P-C), controlled A/B on one estate — same machines, same
+cluster, same binaries, only the idle states changed, verified disabled on all 64 cores:
+
+| in flight | C6/C6P enabled (default) | C6/C6P disabled | throughput | p99 |
+|---|---|---|---|---|
+| 32 | 28,370 @ 12.27 ms p99 | 61,160 @ 1.13 ms p99 | **2.16x** | **10.8x** |
+| 128 | 89,536 @ 16.21 ms p99 | 140,165 @ 4.32 ms p99 | 1.57x | 3.8x |
+
+The gain **shrinks as concurrency rises** (2.16x → 1.57x) because busy cores stop sleeping — that is
+the signature, and a uniform gain would mean something else. A bare TCP round trip on the same A/B
+shows the **median unchanged** (0.261 ms both) while the tail collapses (p99 0.508 → 0.272 ms).
+
+Platform idle-exit latencies, measured: **Intel `intel_idle` C6P = 210 µs**; **Power `pseries_idle`
+CEDE = 12 µs**; **AWS Graviton exposes no cpuidle driver at all**. GridGain p50 at 32 in flight tracks
+these almost exactly — 0.85 / 0.28 / 0.27 ms.
+
+⚠️ **On Power the sign flips with concurrency, so do not generalise the x86 advice to it.** Measured
+as its own A/B (dedicated LPARs, tuned pools, CEDE disabled on both servers and the client, verified
+on 64/64 cores):
+
+| in flight | CEDE on | CEDE off | effect |
+|---|---|---|---|
+| 64 | 188,304 @ 0.75 ms p99 | 181,461 @ 0.74 ms p99 | **−3.6%** |
+| 384 | 211,049 @ 18.42 ms p99 | 227,412 @ **13.29 ms** p99 | **+7.8%** |
+
+Disabling CEDE **costs** throughput at light load and **gains** it at heavy load — the opposite
+ordering to Intel, where the gain was largest at low concurrency. The working explanation, fitted to
+four points and not independently confirmed: `snooze` (the remaining 0 µs state) is a *polling* idle, so
+on SMT=8 an idle sibling consumes issue slots on a shared core — which hurts when many cores are idle.
+At high load few cores idle deeply, but brief idle-to-wake transitions are far more frequent, so CEDE's
+12 µs exit is paid often enough to dominate. At Intel's 210 µs the wakeup dominates in both regimes.
+
+So a `cpu_idle`-style knob must **not** default to "minimise" on ppc64le; on x86 a performance-first
+default is well supported. Graviton exposes no idle states and needs nothing either way. Note also that
+CEDE returns cycles to the PowerVM hypervisor: on a **shared-processor** LPAR
+(`shared_processor_mode=1` in `/proc/ppc64/lparcfg`) disabling it affects the whole frame, not just the
+partition under test. The measurements above are from dedicated-processor LPARs.
+
+**Remediation**, on the cluster *and* generator machines: `cpupower idle-set -D 10` at runtime
+(reversible, `-E` restores), or `intel_idle.max_cstate=1` on the kernel command line to persist. AWS
+documents processor state control for latency-sensitive workloads. Expect higher power draw and no
+change to instance pricing.
+
+**`deployCluster` now warns about this by itself.** Preflight records two facts per machine —
+`cpu_idle_driver` and `cpu_idle_max_exit_us`, the longest exit latency of any *enabled* idle state —
+and `IdleStateAdvice` names any machine above 100 µs, with the `cpupower` command. It is a warning,
+never a refusal: the cluster runs correctly either way and the power trade-off is the operator's.
+Three values are deliberately silent — a measured `0` (no deep states; Graviton), anything at or below
+the threshold (Power's CEDE at 12 µs), and `-1`, which means *never observed*. That last distinction is
+the one to preserve if you touch this: warning on an absent reading teaches operators to ignore
+warnings, and `0` must never collapse into `-1` or the warning fires on the one platform that is
+already right. `ObservedHost.cpuIdleMaxExitUs` is defaulted because `deployment.yaml` has no migration
+path (`ObservedHostIdleStateBackCompatTest` holds that, mutation-checked).
+
+⚠️ **Do not use ICMP `ping` as the latency floor when reasoning about this.** `ping` at its default
+1 packet/s measures the *idle* path and so already contains the wakeup cost; adding a C-state estimate
+on top of it double-counts. Compare a flood ping (`-i 0.001`) against the 1 pps figure to see the
+wakeup cost directly — 0.298 ms vs 0.155 ms on the measured estate.
 
 ## Config-drift detection on redeploy
 
