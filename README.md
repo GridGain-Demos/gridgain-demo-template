@@ -10,6 +10,10 @@ the short path — what to install, how to start the wizard, and the cloud permi
 before you begin, since those have a lead time and are the usual reason a first attempt stalls.
 This file is the reference for everything after that.
 
+**Want an AI agent to drive the toolkit? See [MCP_Quickstart.md](MCP_Quickstart.md).** It covers
+starting the MCP server, registering it with your agent, and which of its tools are read-only,
+which change things and which are destructive.
+
 The GridGain Demo Toolkit is a set of tools for deploying GridGain clusters in various environments.
 Internally to GridGain, there is a [project goals presentation](https://docs.google.com/presentation/d/1EafadCta4LH6VcilLQFJ4wfXdda5J67i/edit?slide=id.p1#slide=id.p1) that may be useful for understanding the structure of the toolkit. This presentation covers the currently supported environments as well as future considerations, so we will not try to keep that information synchonrized here.
 
