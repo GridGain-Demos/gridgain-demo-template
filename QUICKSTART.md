@@ -282,6 +282,17 @@ The skills describe the toolkit, not your demo. Useful openings:
 - *"Which tasks do I need to run, in order, to get from this configuration to a cluster with data
   in it?"*
 
+### Letting Claude run the toolkit, not just read about it
+
+The skills tell Claude what the toolkit *is*. The **MCP server** lets it actually use the toolkit —
+inspect what is deployed, validate the configuration, start and watch runs.
+
+There is no separate server to start: the endpoint is mounted on the demo UI, so
+`./gradlew launchPluginUi` is the whole step, and the startup output prints the registration command
+with its token already filled in. See **[MCP_Quickstart.md](MCP_Quickstart.md)**, which also says
+which of its tools are read-only, which change things, and which are destructive — worth reading
+before pointing an agent at a cloud account.
+
 ### If you edit them
 
 Don't. Each skill is authored in the repo it documents — the toolkit skill in
@@ -302,3 +313,4 @@ everyone else has the same copy.
 | The data generator's scenarios | `README.md` — *The data generator's scenarios file* |
 | Renaming this project | `./rename-demo.sh`, or `README.md` — *Manual rename* |
 | What a Gradle task does, in detail | the `gridgain-demo-toolkit` skill — see [section 6](#6-using-claude) |
+| Letting an AI agent drive the toolkit | `MCP_Quickstart.md` |
