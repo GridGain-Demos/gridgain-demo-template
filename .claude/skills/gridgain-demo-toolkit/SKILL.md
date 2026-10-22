@@ -46,7 +46,7 @@ Tasks live in `src/main/kotlin/com/gridgain/demo/plugin/tasks/`. Most take `-P<n
 | `catalogMetrics` | inventory every metric reaching Prometheus, one file per producer (**read-only**) | `-PmonitorName`, `-PprometheusUrl`, `-PmetricsWindowDays` (default 15), `-PmetricsSnapshotDir` | yes |
 | `deployClusterDcr` / `teardownClusterDcr` | DCR bindings between clusters | `-PclusterName`, `-PconnectionName` | yes |
 | `takeSnapshot` / `restoreSnapshot` | cluster snapshot / restore | `-PclusterName`, `-PprofileName`, `-PsnapshotType`/`-PsnapshotId` | yes |
-| `connectTestClient` | run a test client against a cluster | `-PclusterName`, `-Pmode` (`in-cluster` (default)\|`local`); a `platform: hosts` cluster accepts **`local` only** — there is no namespace to dispatch a Job into | yes |
+| `connectTestClient` | probe a cluster, and optionally count a table or cache | `-PclusterName`, `-Pmode` (`in-cluster` (default)\|`local`\|`host`), `-Pcount=<table\|cache>`; a `platform: hosts` cluster accepts **`local`** or **`host`** — there is no namespace to dispatch a Job into | yes |
 | `dataGenerate` | run a generator scenario (see §Generator dispatch) | `--scenario` (req), **`--targetCluster` (req, every mode)**, `--ops`, `--data`, `--mode` (`local`\|`in-cluster`\|`hosts`), `--dataGenerator` (**required for `--mode=hosts`**), `--timeout` (in-cluster only), `--instanceIndex`/`--instanceCount` (**both or neither**; `--mode=local` only — on `hosts` the fleet's stripes come from `host_instances_per_host`) | **depends** |
 | `deployMessageBroker` / `teardownMessageBroker` | `-PmessageBrokerName` | yes |
 | `dataGeneratorTeardown` | stop a distributed or host generator run, recording an optional end-of-run summary | `-PrunId` / `--runId` (req); optional summary figures are `--`-only (not `-P`): `--achievedRate`, `--totalOps`, `--errorCount`, `--avgLatencyMs`, `--p90LatencyMs`, `--p99LatencyMs` | yes |
@@ -108,11 +108,11 @@ Top level is keyed maps. Instances reference templates/accounts by name; the str
 | `hosts` | one pre-existing machine in a `hosts` infrastructure | points **up** at its `infrastructure`; declares `zone`, `architecture`, `os_family`, and **three** addresses — `ssh_address` (how the controller reaches it), `advertised_address` (what a thin client dials), `bind_address` (what the JVM binds). Collapsing them works on a laptop VM and fails on a multi-NIC lab machine |
 | `distributions` | archives installed on machines | `type: gridgain` / `jdk` / `prometheus` / `grafana` / `otel-collector` / `node-exporter` / `data-generator` / `kafka`. The observability four are static Go binaries and need no JVM; `data-generator` is the exception that does, which is why an infrastructure hosting one needs a `host_jdk_distribution` even if it hosts no cluster. `data-generator` additionally requires `gridgain_major_version` (matched against the target cluster's, so a generator cannot be pointed at a cluster its thin client cannot speak to) and `launcher_name` — the script in the archive's `bin/`, invoked rather than reassembled as a `java -cp` line, because the generator's own build bakes the GG8 `--add-opens` flags into it. `otel-collector` and `node-exporter` additionally require `binary_name`, because upstream publishes `otelcol`, `otelcol-contrib` and `otelcol-k8s` and only the config knows which was downloaded. **`node-exporter` is the per-machine metrics agent**, and unlike the other three it is named by an *infrastructure* (`host_metrics_distribution`) rather than by a monitor: what it measures — the host's CPU, memory, disk and network — belongs to the machine. Note its tarball's root directory embeds the architecture (`node_exporter-1.12.1.linux-ppc64le`) while `expected_root_entry` is one per-distribution value, so a mixed-architecture estate needs **two** `distributions` entries, not two artifacts under one. Version floors are enforced at assembly, not by the schema (a `pattern` cannot compare 2.9.0 against a 2.47.0 floor): Prometheus ≥ 2.47.0 for the OTLP receiver, Grafana ≥ 9.0.0, collector ≥ 0.90.0. Common to every type: `artifacts` keyed by architecture with a `source` that is a `url` (host pulls), a `file` (controller pushes), or an `image` (controller pulls the named `images` entry, extracts `path_in_image`, pushes the result) — no fallback between them. `sha256` lives **inside** the `source`, not beside it: it is required for `url`/`file` and absent for `image`, whose archive does not exist until the controller builds it, so the checksum is computed after extraction. Verification always happens on the machine after transfer. A missing architecture is an error, never substituted; declare `any` for an arch-independent archive. An `image` source may also carry `exclude: [<relative path>…]` to leave directories out of the built archive — every byte is transferred to every machine |
 | `node_pool_templates` | hardware specs | `gke` / `eks` only — a `hosts`, `docker` or `ocp` infrastructure has no node pool the toolkit owns. On `ocp` the machines were sized by whoever installed the cluster, which is why `k8s_node_pool_template` is asked for on the two cloud branches and not on the shared Kubernetes one |
-| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on `gke`/`eks`; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG9 only** on `docker`, via `docker_image` (a GG8 image is refused by name at plugin selection); **GG8 and GG9** on `ocp`, via the shared `image` — GG8 was refused until `gridgain/ultimate` had been measured under `restricted-v2`; see §The `ocp` platform. An `ocp` template is the `gke`/`eks` field set minus `k8s_node_pool_template`; the cluster entry takes the same `k8s_namespace`/`k8s_service_name`, because an OpenShift project is a Namespace. On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
+| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on `gke`/`eks`; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG8 and GG9** on `docker`, via `docker_image`; **GG8 and GG9** on `ocp`, via the shared `image` — GG8 was refused until `gridgain/ultimate` had been measured under `restricted-v2`; see §The `ocp` platform. An `ocp` template is the `gke`/`eks` field set minus `k8s_node_pool_template`; the cluster entry takes the same `k8s_namespace`/`k8s_service_name`, because an OpenShift project is a Namespace. On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
 | `databases` | non-GG DB | `postgres` / `mariadb` (image, port, databaseName, authSecretRef, initDdlLocation, resources, storage) |
 | `cdc_connectors` | Debezium + Kafka pipeline (source: a `databases`; sink: a `clusters`) | `kafka`, `kafka_connect` (`plugins[]`, `jvm_opts[]`), `debezium`, top-level `connectors[]` (extra Connect registrations w/ `__PLACEHOLDER__`→secret) |
 | `secrets` | k8s Secret the toolkit materializes at deploy time, and the payload the `hosts` platform reads on the controller | payload from a pluggable `source` (v1: `kind: sops` — a SOPS-encrypted YAML file + a top-level `path` key). **`source.file` resolves against the demo config's own directory**, like `gridgain8_license_file` and the generator's paths — so with the config at `src/main/resources/demo-config.yaml`, `file: secrets/x.sops.yaml` means `src/main/resources/secrets/x.sops.yaml`, not a `secrets/` at the repo root. Referenced **by name** from the `*_secret_ref` fields below |
-| `data_generators` | streaming data generator as a first-class element | **Not available on `docker` or `ocp`** in this release; drive a Docker cluster from a local run against its published loopback endpoints instead. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
+| `data_generators` | streaming data generator as a first-class element | **Not available on `ocp`** in this release. Available on `gke`, `eks`, `hosts` and `docker`. ⚠️ `eks` was accepted by the schema from v20 but had no assembler until 2026-10-20, so it was refused at assembly with a message naming only gke/hosts/docker — the deployment path was already cloud-neutral (`kubectl`, no `gcloud`), and only the assembler and the node-pool arm were missing. Every entry carries a **`platform`** discriminator since v20 (`gke`/`eks`/`hosts`/`docker`), which must agree with its infrastructure's template — materialised onto the generator rather than followed through the reference because Jackson subtype resolution and the schema's `if`/`then` branches both need a literal property. Common to both: `infrastructure`, `target_cluster` (a name only — the generator resolves addresses itself from `client-endpoints.yaml`), `scenario`, `ops_file`, `data_file`. **k8s** adds a dedicated `wp-<name>` pool with `WorkloadScheduling.forElement` placement: `k8s_namespace`, `k8s_node_pool_template`, `num_nodes`/`min_nodes`/`max_nodes`, `replicas` (0 = staged), `max_replicas`, `per_pod_rate` (0 = unbounded), `pod_resources`, `timeouts.deployment`. **`hosts`** adds `host_distribution` (a `type: data-generator` archive), **`host_instances_per_host`** (v22+, required — processes on *each* of the infrastructure's machines), **`host_jvm_opts`** (v26+, required — the unit's `JAVA_OPTS`; see below), the optional `host_cpus_per_host`, and `host_timeouts.unit_active`, and carries **none** of the pod/node-pool fields — they describe a horizontally scaled set of containers and an autoscaler beneath them, whereas these are processes on machines that already exist. They are absent rather than defaulted, so a misplaced one is reported as the mistake it is |
 | `monitors` | observability | `control-center` / `prometheus-grafana`. **Not available on `docker`**; on `ocp` only `prometheus-grafana` (see §The `ocp` platform) — a Docker infrastructure deploys clusters only. Every entry carries a **`platform`** discriminator since v19 (`gke`/`eks`/`hosts`), which must agree with its infrastructure's template. `control-center` is constrained to the two Kubernetes platforms — there is no host Control Center; a host cluster reaches one via `host_control_center_url`. `prometheus-grafana` on `hosts` takes `host_prometheus`, `host_grafana`, `host_otel_collector`, `host_storage` and `host_timeouts`; the Kubernetes branch keeps `num_nodes`/`min_nodes`/`max_nodes` and the `k8s_*` fields, which moved out of the top level at v19 because they are node-pool concepts a machine set has nothing to do with |
 | `connector_templates` | cluster sidecars / agents | `cloud-connector` (CC) / `otel-collector` (Prom/Grafana) / `ignite-agent` |
 | `dcr_templates` → `dcr_connections` | replication | `gg8` (push) / `gg9` (pull) |
@@ -556,12 +556,45 @@ the consumer is concretely `client-finder-common`'s `ClientEndpointsLoader` (whi
 `AddressResolution`. Named here because confirming it once cost a whole session: the published jar can lag
 the source by days, so when a contract spans repos, **check the artifact, not just the code**.
 
+Alongside it the writer renders **one ConfigMap manifest per namespace**,
+`<demoOutputDirectory>/client/client-endpoints-configmap-<namespace>.yaml`, and the deploy applies only
+the one for the namespace it is deploying into. Per-namespace files rather than one combined file because
+a demo's namespaces need not share a Kubernetes cluster: two GridGain clusters in two GKE regions are two
+API servers, and a combined manifest applied to one of them fails with `namespaces "<other>" not found`.
+The *payload* inside every manifest stays multi-cluster, so a pod can still discover clusters in other
+Kubernetes clusters and on hosts — narrowing it would trade a loud failure for a silent one.
+
 ## The `docker` platform
 
-Containers on **one** Docker daemon, reached over a local socket. **GridGain 9 clusters only** —
-a GG8 image is refused by name when the plugin is selected, rather than assembled and then failed at
-deploy. No monitors, no data generators, no databases; those route to the shared "not supported on
-this platform" failure naming both ways out.
+Containers on **one** Docker daemon, reached over a local socket. **Both GridGain versions** — GG8
+was refused by name at plugin selection until its Spring XML could be rendered for a container and
+its activation step had somewhere to run; it now renders the *hosts* template with a container
+context and activates through `docker exec`. No monitors, no databases; those route to the shared
+"not supported on this platform" failure naming both ways out.
+
+**Replication IS supported here, on both versions** — see §Data centre replication and
+§Replication across two Docker networks below. It is the only local way to exercise replication, and
+the only platform where a replicating pair costs nothing to stand up.
+
+**Two ways to drive load at a Docker cluster.** `dataGenerate --mode=local` forks a JVM on the
+laptop, needs no `data_generators` entry, and is the shorter path for a quick test.
+`--mode=docker` runs the generator as containers on the cluster's own network — that is the demo
+shape: same network, same monitoring, torn down by the same command, and reaching the cluster the
+way an application would rather than through published ports that exist only on your machine.
+
+⚠️ **A Docker cluster publishes two views of itself**, and which one is right depends on where the
+caller runs:
+
+| Caller | Context | Addresses |
+|---|---|---|
+| laptop, controller, `--mode=local` | `local` | `127.0.0.1:<published client port>` |
+| a container on the cluster's network | `in_cluster` | `<container name>:<in-container client port>` |
+
+Both are written to `client-endpoints.yaml` on every deploy. A containerised client selects the
+second with `-Dgg.demo.client.context=in_cluster`. `in_cluster` is reused rather than a third
+context invented: the name already means "valid from inside the deployment", Kubernetes fills it
+with Service DNS and Docker with container DNS, and the finder picks a context from the runtime
+context alone without ever looking at `deployment_kind`.
 
 Like `hosts`, it **prepares rather than provisions**: the daemon is the operator's and is never
 created or destroyed. A deploy creates the shared bridge network; a teardown removes it.
@@ -573,11 +606,67 @@ created or destroyed. A deploy creates the shared bridge network; a teardown rem
 | peer-to-peer | the **container name**, resolved by the user-defined bridge's embedded DNS |
 | bind | every interface inside the container — a container is single-homed, so unlike a lab machine there is no wrong one to pick |
 | client-facing | `127.0.0.1:<published port>` on the machine running the toolkit |
+| the host, from inside a container | `host.docker.internal` — see below |
 
 The network must be **user-defined**, never Docker's default bridge: only a user-defined network
-runs the embedded DNS server, and name resolution is the whole addressing model. Each node takes a
-block of `docker_host_port_base` (management, then client), published to **loopback only** — a demo
-cluster has no business being reachable from the local network.
+runs the embedded DNS server, and name resolution is the whole addressing model. Published ports go
+to **loopback only** — a demo cluster has no business being reachable from the local network.
+
+**Host port layout.** A cluster of *n* nodes takes `n * 3` ports from `docker_host_port_base`, in
+two blocks:
+
+| Ports | What |
+|---|---|
+| `base + i*2`, `base + i*2 + 1` | node *i*'s management and thin-client ports — one contiguous **pair per node** |
+| `base + n*2 + i` | node *i*'s **DCR receiver** port, in one block after every node's pair, published by GridGain 8 clusters that replicate and by nothing else |
+
+⚠️ **This tightened the accepted `docker_host_port_base`** from at most **65503** to at most
+**65487**, for *every* Docker cluster — including a GridGain 9 one, and a GridGain 8 one that never
+replicates, neither of which publishes a receiver port. The headroom check reserves `16 * 3` rather
+than `16 * 2`, because it is a bound on what a plausible cluster *could* take rather than a
+prediction of what this one will. A base in that 16-port band is now refused at validation, by name
+and with the new maximum in the message; nothing fails later or more quietly than before.
+
+⚠️ The receiver ports are a block *after* the pairs rather than a third port inside each pair, and
+that is load-bearing. `deployment.yaml` records the **spec** and re-derives the published ports from
+it, and deployment state has **no migration path** — widening the per-node stride would make an
+already-deployed multi-node cluster compute ports its running containers were never published with,
+and a teardown would then miss them. A port a node gains later goes in a new block, never inside an
+existing one.
+
+### Replication across two Docker networks
+
+A container name resolves only on the network that owns it, so a GridGain 8 sender whose peer is on
+a **different** `docker_network_name` is given `host.docker.internal:<peer's published receiver
+port>` instead of the peer's container names — out of its own network, onto the daemon's host, and
+back in through the published port. Same network, same answer as before: container names. The
+toolkit decides which from the two clusters' resolved networks (`DcrLocality`), not from anything
+the operator states.
+
+⚠️ **On Linux `host.docker.internal` is not a name a container has by default.** Docker Desktop
+provides it; a Linux daemon only does when the container is run with
+`--add-host=host.docker.internal:host-gateway`, which the toolkit now always passes (Docker 20.10+).
+
+**The receiver port is the one exception to loopback, and only when a peer is on another network.**
+`host-gateway` resolves to the bridge's host-side address (`172.17.0.1`-ish), not to loopback, so a
+receiver published as `127.0.0.1:<port>` would refuse the one connection the port exists for. An
+`EXPOSED` cluster therefore publishes **that port and no other** on `0.0.0.0`:
+
+| Cluster | Receiver port published on |
+|---|---|
+| peer on the **same** network (`DERIVED`) | `127.0.0.1` — unchanged; the peer reaches the container by name and never dials a published port |
+| peer on **another** network (`EXPOSED`) | `0.0.0.0` |
+
+Management and client ports stay on `127.0.0.1` in both cases. The toolkit decides from the
+classification it already computed, which is recorded on the binding in `deployment.yaml` as
+`peer_locality`; a record written before that field existed reads as `DERIVED`, so an upgraded
+cluster redeploys with exactly the publication it already had.
+
+⚠️ **What is actually tested.** The configuration this produces — `--add-host` present and the
+receiver port on `0.0.0.0` — is what a Linux daemon needs, and both halves are pinned by unit
+tests. The end-to-end path has been exercised on **Docker Desktop (macOS)** only; nothing here has
+been run against a Linux daemon, so treat Linux as "no longer blocked by the toolkit's own
+configuration" rather than as verified.
 
 ### Minimum configuration
 
@@ -799,6 +888,50 @@ would need, the kubeconfig context, cannot be discovered or guessed. See
 `WizardIntent.SCAFFOLDABLE_PLATFORMS`.
 
 ## Generator dispatch (`dataGenerate`)
+
+### `--mode=docker`
+
+```yaml
+data_generators:
+  load:
+    platform: docker
+    infrastructure: gen-infra        # any docker infrastructure; the NETWORK comes from the cluster
+    target_cluster: east
+    scenario: orders
+    ops_file: data/ops.yaml
+    data_file: data/data.yaml
+    docker_instances: 2              # containers, each with its own key-space slice
+    docker_jvm_opts: "-Xms512m -Xmx1g"
+```
+
+```bash
+./gradlew deployDataGenerator -PdataGenerator=load
+./gradlew dataGenerate --scenario orders --targetCluster=east --mode=docker --dataGenerator=load
+./gradlew dataGeneratorTeardown -PrunId=<run>
+```
+
+**Deploy installs nothing.** There is no archive and no unit — `docker run` pulls the image. What
+`deployDataGenerator` does here is check that the target cluster's network exists, which is the one
+precondition that cannot wait: without it every run fails inside `docker run` naming an unknown
+network and nothing about the cluster that owns it.
+
+⚠️ **The network and the image flavour both come from the TARGET CLUSTER**, not from the generator's
+own entry. A generator on its own infrastructure's network would start, report healthy and resolve
+no cluster container at all; and nothing on the generator entry selects GG8 or GG9, because a second
+place to say it is a second place for it to disagree.
+
+⚠️ **The containers read the `in_cluster` endpoints context.** The `local` context holds
+`127.0.0.1:<published port>`, which from inside a container names *that container*. This is set for
+you; it is listed here because it is what to check first if a generator starts and connects to
+nothing.
+
+**`--instanceIndex` / `--instanceCount` are refused**, as they are on hosts: the fleet's slices come
+from `docker_instances`, and a hand-supplied slice would be a second division of the same key space.
+Size the fleet with `docker_instances`, or use `--mode=local` for one hand-striped process.
+
+**Teardown removes the containers** rather than stopping them — `docker logs` on a stopped generator
+holds nothing worth keeping, and a laptop accumulating exited containers is how a demo platform
+earns a reputation for mess. The whole run group goes, not the one record you named.
 
 The plugin runs the data generator from `ops.yaml`/`data.yaml` (see the `gridgain-demo-data-generator` skill for those files) in one of **three modes**, `--mode=local` / `in-cluster` / `hosts`.
 
@@ -1308,6 +1441,339 @@ path (`ObservedHostIdleStateBackCompatTest` holds that, mutation-checked).
 on top of it double-counts. Compare a flood ping (`-i 0.001`) against the 1 pps figure to see the
 wakeup cost directly — 0.298 ms vs 0.155 ms on the measured estate.
 
+## Data centre replication (`dcr_templates`, `dcr_connections`)
+
+Both ends must be the same platform and the same major version. The two versions do not merely
+differ in configuration — they are **different mechanisms**, and almost nothing below transfers.
+
+| | GridGain 8 | GridGain 9 |
+|---|---|---|
+| Model | **push** — the source sends | **pull** — the target fetches |
+| Configured by | Spring beans in the node config, at deploy time | **REST calls to the target**, at activation time |
+| Platforms | `gke` ↔ `gke`, `eks` ↔ `eks` (**one or two infrastructures**), `hosts` ↔ `hosts`, `docker` ↔ `docker` (either network) | `hosts` ↔ `hosts`, **`docker` ↔ `docker`** (one network) |
+| Unit of work | the sender group | the replication (one per connection) |
+| Lifecycle | resume / pause | create → start → stop (**no pause**) |
+| Peer port | the template's `local_inbound_port` | the source's **client port** (10800) |
+
+Refused on both: `ocp`, any cross-platform pair, any cross-version pair.
+
+⚠️ **Where a network boundary may fall depends on the version.** Peer addresses are classified by
+`DcrLocality`, and GridGain 8 crosses every boundary below while GridGain 9 crosses none:
+
+| Pair | GridGain 8 | GridGain 9 |
+|---|---|---|
+| Two Kubernetes clusters, **one** `infrastructure` | ✓ receiver Service DNS | ✗ (Kubernetes refused outright) |
+| Two Kubernetes clusters, **two** infrastructures | ✓ the receiver LoadBalancer's recorded address | ✗ refused |
+| Two `docker` clusters, one `docker_network_name` | ✓ container names | ✓ container names |
+| Two `docker` clusters, **two** networks | ✓ `host.docker.internal:<published receiver port>` | ✗ refused |
+| `hosts` ↔ `hosts` | ✓ `advertised_address` | ✓ `advertised_address` |
+| `hosts` ↔ Kubernetes, `hosts` ↔ `docker` (**mixed**) | ✗ refused | ✗ refused |
+
+**Two Kubernetes clusters on two infrastructures replicate**, and the address is the only part of
+it that is unusual. A receiver Service's DNS name resolves only inside the cluster that owns it, so
+a cross-infrastructure receiver is rendered `type: LoadBalancer` instead; the address the cloud
+assigns it is discovered when that cluster is deployed and written to its `deployment.yaml` record
+as `dcr_receiver_endpoints`. The peer reads it back from there.
+
+⚠️ **An address that is not recorded is never guessed.** Deployment order does not matter, but
+*some* order does: a cluster deployed before its peer resolves no peer address, renders no sender
+and replicates nothing, which is why `deployClusterDcr` re-renders and re-applies the node
+configuration before it resumes (see below). If the peer still has no recorded address at that
+point the task refuses and names the cluster to deploy or redeploy. It will not fall back to the
+in-cluster Service DNS name — that is the value that makes both ends accept the configuration and
+move no data, and it has cost days here before.
+
+⚠️ **A mixed pair is refused in both directions**, because the derived addresses only work one way
+round: a hosts cluster is dialled at its `advertised_address`, which a pod or a container can reach,
+but the hosts end is handed the peer's Service DNS name or container name and a machine resolves
+neither. Two directional variants (GG8 unidirectional Kubernetes→hosts, GG9 unidirectional
+hosts→docker) would in fact function, each by accident — the first only because `putV8DcrContext`
+renders addresses from outgoing bindings alone. They are refused with the pair deliberately: a pair
+that works in one direction by accident is not a supported topology. Both ends must be the same kind
+of platform.
+
+`ocp` is refused at either end, and reported from either end — from the OpenShift cluster by
+`OcpClusterSpecAssembler` and from its peer by `validateDcrBindings`, so a GKE ↔ OCP pair is never
+told to share an infrastructure instead.
+
+⚠️ **The platform split is about reachability, not licensing or protocol.** GridGain 9 replication
+is configured by REST calls the toolkit's controller makes to the *target* cluster's management API,
+so a platform qualifies exactly when it publishes an address the controller can reach:
+
+- **`hosts`** — `host_rest_address` plus the management port.
+- **`docker`** — node 0's published loopback port, the same one the cluster init already uses.
+- **Kubernetes** — ✗. Its management API answers inside the cluster only, which is why its own
+  initialisation runs through a CLI in an in-cluster Job. Making it work there is a Job or a
+  port-forward, and is not done. If asked, say that — not "GG9 replication isn't supported".
+
+### The shape
+
+Two top-level sections. A connection names two clusters and a template; the template carries the
+GridGain 8 sender and receiver settings:
+
+```yaml
+dcr_templates:
+  gg8-full:
+    type: gg8
+    sender_configuration:
+      sender_groups: [default]
+    receiver_configuration:
+      local_inbound_port: 49000     # clear of 47500 discovery / 47100 comms / 10800 client
+      message_queue_limit: 10000
+    replicate_all: true             # a `*` cache template, so future caches replicate too
+    cache_defaults: { sender_group: default, batch_send_size: 32768 }
+    caches: []                      # per-cache overrides, when replicate_all is false
+
+dcr_connections:
+  dc1-to-dc2:
+    source_cluster: payments
+    target_cluster: payments-dr
+    dcr_template: gg8-full
+    bidirectional: false
+```
+
+Each cluster also declares `dcr_data_center_id` (1–31), and the two **must differ** — GG8 8.9 refuses
+a sender hub whose local and peer ids match (`DrProcessor.assertReplicaParameter`).
+
+⚠️ **An id with no connection naming the cluster is refused.** The id distinguishes a cluster from
+its replica and does nothing alone, so declaring one by itself is configuration that reads as
+meaningful and has no effect.
+
+⚠️ **`bidirectional: false` is supported.** Both clusters still get a binding — each needs its
+receiver listener — and only the source is marked outgoing. An older comment in
+`ClusterSpecAssembler` claimed the validator enforces `true`; it does not and never did.
+
+### On `hosts` specifically
+
+**Two host infrastructures, not one.** There may be only one cluster per host infrastructure, so a
+replicating pair needs an infrastructure each — at minimum two machines, realistically four.
+
+**The peer is addressed by its machines.** A Kubernetes peer resolves to its receiver Service DNS; a
+host peer resolves to the `advertised_address` of **every enabled machine** of its infrastructure,
+sorted by host name. All of them, because every node carries the receiver listener and GG8 renders
+them into one `DrSenderConnectionConfiguration` — a sender that knows only one node stops
+replicating when that node restarts, and that reads as a network fault rather than a configuration
+one.
+
+**The receiver port is opened automatically**, derived from the bindings and added to the same list
+as discovery and communication. ⚠️ A receiver port left closed is the worst failure shape available
+here: both clusters start, both report healthy, the sender retries into a dropped connection, and
+nothing says so.
+
+**Activation is a separate step on both platforms.** Deploying the clusters configures replication;
+it does not start it. `deployClusterDcr` runs `control.sh --dr resume <peer_data_centre_id>` — ⚠️ the PEER's `dcr_data_center_id`, not a sender group; a sender group name is rejected with `Invalid value for remoteDataCenterId` and exit 1 — through
+`kubectl exec` on Kubernetes, over ssh as the service user on hosts — and `teardownClusterDcr` runs
+`--dr pause`. Both are idempotent.
+
+```bash
+./gradlew deployClusterDcr   -PclusterName=payments               # all of its bindings
+./gradlew deployClusterDcr   -PclusterName=payments -PconnectionName=dc1-to-dc2
+./gradlew teardownClusterDcr -PclusterName=payments
+```
+
+⚠️ **On Kubernetes, activation re-renders and re-applies the cluster's node configuration first.**
+A GridGain 8 sender reads its peer's address out of `ignite-node-cfg.xml` at node startup, and a
+peer on another Kubernetes infrastructure has no address until its LoadBalancer has been given one
+— which happens when that peer is deployed, possibly after this cluster was. So `deployClusterDcr`
+re-renders the cluster's manifests against `deployment.yaml`, applies `config-map.yaml` and
+`statefulset.yaml`, **waits for the StatefulSet to finish rolling**, and only then resumes. Expect
+the task to restart the cluster's pods when the configuration has changed, and to take as long as a
+deploy does. Nothing else is re-applied: in particular the DCR receiver Service is left alone,
+because recreating it on GKE or EKS would change the address the peer has already been told to dial.
+Docker and `platform: hosts` clusters re-render nothing — their peers' addresses come from
+configuration, so the running nodes already have them.
+
+⚠️⚠️ **That re-render uses the cluster's CURRENT template, and there is no drift check on this
+path.** The manifests come from `demo-config.yaml` as it stands now, not from the spec recorded in
+`deployment.yaml` when the cluster was deployed, and both applies are unconditional. So any edit
+made to the cluster's template since it was deployed — image tag, heap, resource limits, **node
+count** — reaches the running cluster as a side effect of activating replication. A raised `nodes`
+becomes a scale-up; a changed image becomes a rolling upgrade. The task says so in its output
+before it applies anything. If you did not intend a redeploy, compare the template against the
+cluster first. Two template settings are refused outright rather than waited for, because under
+either the pods never pick the new configuration up on their own and some nodes would go on
+dialling the peer's old address: `update_strategy_type: OnDelete`, and any
+`update_strategy_partition` above `0`.
+
+⚠️ **Replication rides on the licence bean.** A GridGain 8 node takes a single `pluginConfigurations`
+list, and the hosts node configuration already uses it for `licenseUrl`. Both the licence and the DR
+settings live on one `GridGainConfiguration` bean for that reason. A second bean drops the licence
+URL, and the node then fails with *"License file URL is not provided and cannot be determined"* —
+which reads as a missing licence rather than a duplicated bean.
+
+### Known limits
+
+- **One peer per cluster is honoured.** A single `DrSenderConnectionConfiguration` is emitted, so
+  with several bindings only the first outgoing peer's data centre id is used. Carried over from the
+  Kubernetes path; a multi-peer topology needs one connection bean per peer.
+- **Cross-platform pairs are refused**, not broken-but-allowed. The toolkit does publish an
+  externally reachable Kubernetes receiver now, but only for a Kubernetes *peer*: a hosts end is
+  still handed the other's Service DNS name or container name and resolves neither.
+- **Not exercised on real hardware.** The hosts path is covered by unit tests — resolved addresses,
+  rendered XML, argv shapes — and has not been run against two live clusters. Treat the first
+  deployment as the real test, and verify with `control.sh --dr state` on both ends rather than by
+  the task's exit code.
+
+## GridGain 9 replication specifically
+
+Everything above this heading is GridGain 8 unless it says otherwise. The GG9 config surface is the
+same two sections, with a `gg9` template:
+
+```yaml
+dcr_templates:
+  gg9-core:
+    type: gg9
+    replication_scope:
+      schema: PUBLIC
+      tables: [CUSTOMER, ACCOUNT]   # must already exist on BOTH clusters
+      replicate_all: false
+
+dcr_connections:
+  dr-to-dc1:
+    source_cluster: payments-dr     # the data origin; configures nothing
+    target_cluster: payments        # the puller; everything happens here
+    dcr_template: gg9-core
+    bidirectional: false
+```
+
+**No `dcr_data_center_id`.** That is a GG8 field, and a GG9 cluster declaring one is refused.
+
+**Only the target gets a binding** when `bidirectional: false`. The source is never configured, runs
+nothing, and does not dial out — it only has to be live and licensed. Do not look for symmetry; the
+GG8 reciprocal-binding rule does not apply and is not checked.
+
+### What activation actually does
+
+`deployClusterDcr` issues two POSTs to the target's management API, then records the binding:
+
+1. `POST /management/v1/dcr/replications` — `{name, sourceClusterAddresses}`
+2. `POST /management/v1/dcr/replications/{name}/start` — `{schemaName, allTables, tableList}`
+
+`teardownClusterDcr` issues `POST .../{name}/stop`. The connection name is the replication's name at
+the API, which is how every later call addresses it.
+
+⚠️ **There is no pause/resume in GridGain 9.** `stop` then `start` is the equivalent, and `start` on
+an existing replication resumes it. `deployment.yaml` still records `PAUSED` after a teardown —
+that field is the toolkit's record of what it last asked for, not the cluster's own state word.
+
+⚠️ **Teardown stops, it does not delete.** Delete discards the replication's position, so the next
+start re-reads everything from the beginning. Stop leaves it resumable.
+
+### The four things that will bite
+
+⚠️ **Tables must already exist on both clusters.** There is no schema propagation. A replication
+naming a table that is missing on either side fails at `start`, and this is the likeliest real-world
+failure after licensing.
+
+⚠️ **`replicate_all: true` means every table in every schema, and `schema:` is ignored.** That is
+GridGain 9's own behaviour for the API's `allTables` flag, not the toolkit's reading of it. The set
+is snapshotted when replication starts, so a table created later is not picked up until stop/start.
+The toolkit passes the flag through unchanged rather than emulating a per-schema meaning. Say this
+out loud to anyone who sets `replicate_all: true` alongside a `schema:`.
+
+⚠️ **Licensing differs by end, and a missing feature is an HTTP 503.** The **target** needs
+`DATA_CENTER_REPLICATION`; the **source** needs `CONTINUOUS_QUERIES`. The toolkit's 503 message
+names both — a bare 503 sends people to look at the network.
+
+⚠️ **`create` dials the source as it runs.** It reads the source's cluster name back, which is how it
+refuses self-replication. So the source must be deployed and running *before* activation; the
+toolkit checks deployment state first so this reads as "deploy the other cluster" rather than as a
+connection error.
+
+### `bidirectional: true` on GG9
+
+Allowed, and it means **two independent replications**, one created on each cluster, each pulling
+from the other. It is not one two-way link.
+
+⚠️ **The loop-prevention behaviour is not verified.** The expectation is that GridGain 9's watermarks
+stop an update being re-transmitted once it has returned to its origin — wasteful rather than
+unbounded. That was not confirmed from the source, and GridGain has an unmerged branch adding
+explicit origin-filtering (`__DCR_ORIGIN_DC_ID`), which suggests stock behaviour does re-transmit at
+least once. Offer active-active with that caveat stated; do not present convergence as a known
+property.
+
+### Firewall and addressing
+
+**Nothing new is opened.** The target dials the source's **client port**, which every node already
+listens on and `firewallPorts` already includes; the controller reaches the target's **management
+port**, likewise already open. If you find yourself adding a DCR port for GG9, something is wrong.
+
+⚠️ **Two directions, and they are opposites.** The controller configures replication over the
+cluster's *externally published* address; the replication then pulls over the source's *internal*
+address. Getting either one the other way round produces a replication that is created, accepted and
+never connects.
+
+| | Controller → target (REST) | Target → source (data) |
+|---|---|---|
+| `hosts` | `host_rest_address`:management | every enabled machine's `advertised_address`:client |
+| `docker` | `127.0.0.1`:**published** management | every container by **name**:client, inside the network |
+
+**The source resolves to every node**, not one: a source list of one stops replicating when that
+node restarts.
+
+### On `docker` specifically
+
+A replicating pair needs **two infrastructures**, and the reason is the port base:
+`docker_host_port_base` and `docker_network_name` both live on the *infrastructure template*, so one
+shared template would put both clusters on the same published ports and the second would fail to
+start.
+
+So: **two templates, different `docker_host_port_base`, the same `docker_network_name`.**
+
+⚠️ **The shared network is enforced.** Two Docker clusters on different networks are refused at
+validate time, because the target pulls from the source *by container name* and a container only
+resolves a sibling on a network they share. Left unchecked it is the worst failure shape available —
+both clusters deploy, the replication is created and started and reports healthy, and nothing ever
+arrives.
+
+⚠️ **GridGain 8 replication is still refused on `docker`**, and that is a different fact from the
+platform being unsupported. GG8 renders a sender hub into the node's Spring XML and dials the peer's
+receiver port; the Docker cluster plugin renders no such configuration. GG9 needs no node-side
+configuration at all, which is why it works here and GG8 does not.
+
+### Not run against live clusters
+
+⚠️ **This has never replicated a row.** The request shapes were read off `gg-dcr`'s own request
+classes and are pinned by tests through a real HTTP client, but no GG9 pair has been available since
+the Power lab moved on. Treat the first deployment as the real test, and verify with
+`GET /management/v1/dcr/replications/{name}` showing `REPLICATING` — not by the task's exit code,
+which a drift-skipped deploy also returns 0 for.
+
+### Proving that data actually crossed
+
+`REPLICATING` says the replication is live. It does not say a row moved. Count both ends:
+
+```bash
+./gradlew connectTestClient -PclusterName=payments    -Pmode=local -Pcount=PUBLIC.CUSTOMER
+./gradlew connectTestClient -PclusterName=payments-dr -Pmode=local -Pcount=PUBLIC.CUSTOMER
+```
+
+`-Pcount` names a **table on GridGain 9** and a **cache on GridGain 8** — the thing each version
+replicates. The task prints the number after its usual reachability probe. On GG8 the count is
+`CachePeekMode.PRIMARY`, so it is distinct entries rather than entries × copies; comparing a default
+`size()` across two clusters with different backup counts would show a mismatch that is not there.
+
+⚠️ **Stop the load first.** A count taken while a generator is running is a moving number at both
+ends, and replication is asynchronous, so the two will differ for reasons that say nothing. Stop the
+generator, let it settle, then count.
+
+⚠️ **Equal counts are not equal data.** This counts rows; it does not compare them. It is enough to
+show replication is working and enough to catch it not working, which is what the first test needs.
+
+⚠️ **`-Pcount` is refused with `-Pmode=in-cluster`**, and deliberately: that mode runs the client
+from a Job manifest whose arguments are fixed when the manifest is written, so the flag has nowhere
+to go. It is refused rather than dropped, because a silently un-counted run looks exactly like a
+cluster with no rows in it. Use `-Pmode=local`, or `-Pmode=host` to run it on one of the cluster's
+own machines when the controller cannot reach the client port.
+
+A missing table or cache is reported with the names that *do* exist — on GG9 that usually settles a
+case problem, since unquoted DDL identifiers are stored upper-case.
+
+⚠️ **Do not reach for the cluster-config REST endpoint while debugging this.** A 400 from
+`/management/v1/cluster/configuration` is not a rejection: an invalid value is replicated before it
+is validated and **stops every node**. That took down both Power nodes on 2026-09-23.
+
+
 ## Config-drift detection on redeploy
 
 Each per-element `Deploy*Action` records a SHA-256 fingerprint of its
@@ -1350,6 +1816,30 @@ is overwritten with the current one.
 `config_hash` decode with `configHash = null` (treated as "no record" — the
 action proceeds and stamps on first re-deploy under the new plugin). No
 schema_version bump.
+
+### ⚠️ A redeploy that changes a GG8 k8s cluster's configuration now restarts it
+
+Different hash, different question. The drift hash above asks *"did this element's
+demo-config block change"*. The GridGain 8 Kubernetes StatefulSet separately carries
+`gridgain.demo/config-sha256` on its **pod template** — a digest of the rendered
+`config-map.yaml` — which asks *"did the configuration the nodes read change"*. The two are
+deliberately not the same hash and are not interchangeable.
+
+It exists because `kubectl apply` on a ConfigMap does **not** restart the pods mounting it, and a
+GridGain node reads `ignite-node-cfg.xml` once, at startup. Before this, a changed configuration
+applied cleanly to the ConfigMap and never reached the running cluster: the task succeeded, every
+manifest was correct, and the nodes went on using the old settings indefinitely.
+
+- **Applies to every GG8 k8s cluster** — GKE, EKS and OCP — not only DCR ones.
+- ⚠️ **A single-node cluster restarting is a full outage.** It has no second node to serve from,
+  and non-persistent data is gone.
+- **An unchanged redeploy rolls nothing.** The digest changes only when the rendered ConfigMap
+  does, so the pod template stays byte-identical and the controller does nothing.
+- ⚠️ **Template-ref drift is the case that will surprise you.** A `cluster_template` edit does not
+  change the element's own block, so the drift check above does not flag or skip it — the deploy
+  proceeds, the ConfigMap changes, and the cluster rolls. That is correct, and it is the first
+  time it has ever happened.
+- GridGain 9 k8s clusters are unaffected (separate template, no annotation).
 
 ## Gotchas (verified)
 
