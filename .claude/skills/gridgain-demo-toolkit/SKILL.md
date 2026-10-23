@@ -1497,14 +1497,42 @@ of platform.
 told to share an infrastructure instead.
 
 ⚠️ **The platform split is about reachability, not licensing or protocol.** GridGain 9 replication
-is configured by REST calls the toolkit's controller makes to the *target* cluster's management API,
-so a platform qualifies exactly when it publishes an address the controller can reach:
+is configured by calls to the *target* cluster's management API, and how they are made depends on
+whether that API answers from outside:
 
-- **`hosts`** — `host_rest_address` plus the management port.
-- **`docker`** — node 0's published loopback port, the same one the cluster init already uses.
-- **Kubernetes** — ✗. Its management API answers inside the cluster only, which is why its own
-  initialisation runs through a CLI in an in-cluster Job. Making it work there is a Job or a
-  port-forward, and is not done. If asked, say that — not "GG9 replication isn't supported".
+- **`hosts`** — `host_rest_address` plus the management port; the controller calls it directly.
+- **`docker`** — node 0's published loopback port, the same one the cluster init already uses;
+  the controller calls it directly.
+- **`gke` / `eks`** — the controller cannot reach it, so the calls run from a **Job inside the
+  target cluster** (`dcr-job.yaml` + its script ConfigMap), using the GridGain 9 CLI already in the
+  cluster image. Nothing is exposed: the management API stays in-cluster.
+- **`ocp`** — ✗, and this is absent toolkit support rather than absent GridGain support. Three
+  pieces are missing and the first two fail *silently* without the third: no `dcr-source-service`
+  apply/delete step in `OcpGridGainV9ClusterPlugin`, no `oc` probe honouring `ocp_context` in
+  `dcrSourceEndpointsFor` (a bare kubectl probe reads whatever cluster the ambient kubeconfig
+  points at), and no OpenShift arm in `writeGg9DcrJobManifests`.
+
+**Across two Kubernetes infrastructures**, the source publishes a dedicated `<cluster>-dcr-source`
+LoadBalancer on its **client** port, and the target pulls from the address that LoadBalancer was
+assigned — discovered at deploy time and recorded as `dcr_source_endpoints` on the source's
+deployment record. Deploy the source first, or activation refuses by name; the address is never
+guessed, because the only guessable value is in-cluster DNS and that produces a replication which
+starts, reports healthy and moves nothing.
+
+⚠️ It is published by replication, **not** by `demo_access` — switching demo access off must not
+break a peer's replication, and `demo_access`'s `max_exposed_nodes` would silently truncate the
+address list. Same reasoning as the GridGain 8 receiver Service.
+
+⚠️ **A bidirectional GG9 connection across two Kubernetes infrastructures is refused.** Each end
+pulls from the other, so each must publish, but both emit a pull binding and the publication marker
+goes only to an end that emits nothing else. Use two unidirectional `dcr_connections` entries —
+same topology, both addresses published. Bidirectional *within* one infrastructure is fine, since
+nothing has to be published.
+
+⚠️ **The source's client port is the full thin-client data API**, not a replication-only channel
+like GridGain 8's receiver port. On a public LoadBalancer with no allowlist, anything that reaches
+it can run arbitrary SQL. That is the accepted risk recorded in the design; the egress allowlist
+remains outstanding.
 
 ### The shape
 
