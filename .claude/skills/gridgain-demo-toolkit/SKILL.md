@@ -54,6 +54,7 @@ Tasks live in `src/main/kotlin/com/gridgain/demo/plugin/tasks/`. Most take `-P<n
 | `startDemoAccess` / `stopDemoAccess` / `refreshDemoAccess` | kubectl port-forward tunnels | — | no (bg) |
 | `launchPluginUi` | operator UI (Ktor) | `-PuiPort` | no (server) |
 | `bootstrapPublicImages` | seed the **public** images into config — `StandardImages` (GG8, GG9, Control Center backend/frontend) pulled anonymously from `docker.io`. It does **not** seed `data-generator-gg8`/`gg9`; see §Generator images | `-PdemoConfigFile` | yes |
+| `resolveDistribution` | find a published GridGain server distribution by version and print a pasteable `distributions:` entry (see §Resolving a distribution by version) | `-Pproduct` (req), `-PdistributionVersion` (req), `-Prespin`, `-PentryName` | no (prints) |
 | `clearPluginOutput` | delete generated output + runtime state | — | yes |
 
 *This table reflects the current source — treat the `tasks/` package as authoritative if a task is missing or an option differs.*
@@ -108,7 +109,7 @@ Top level is keyed maps. Instances reference templates/accounts by name; the str
 | `hosts` | one pre-existing machine in a `hosts` infrastructure | points **up** at its `infrastructure`; declares `zone`, `architecture`, `os_family`, and **three** addresses — `ssh_address` (how the controller reaches it), `advertised_address` (what a thin client dials), `bind_address` (what the JVM binds). Collapsing them works on a laptop VM and fails on a multi-NIC lab machine |
 | `distributions` | archives installed on machines | `type: gridgain` / `jdk` / `prometheus` / `grafana` / `otel-collector` / `node-exporter` / `data-generator` / `kafka`. The observability four are static Go binaries and need no JVM; `data-generator` is the exception that does, which is why an infrastructure hosting one needs a `host_jdk_distribution` even if it hosts no cluster. `data-generator` additionally requires `gridgain_major_version` (matched against the target cluster's, so a generator cannot be pointed at a cluster its thin client cannot speak to) and `launcher_name` — the script in the archive's `bin/`, invoked rather than reassembled as a `java -cp` line, because the generator's own build bakes the GG8 `--add-opens` flags into it. `otel-collector` and `node-exporter` additionally require `binary_name`, because upstream publishes `otelcol`, `otelcol-contrib` and `otelcol-k8s` and only the config knows which was downloaded. **`node-exporter` is the per-machine metrics agent**, and unlike the other three it is named by an *infrastructure* (`host_metrics_distribution`) rather than by a monitor: what it measures — the host's CPU, memory, disk and network — belongs to the machine. Note its tarball's root directory embeds the architecture (`node_exporter-1.12.1.linux-ppc64le`) while `expected_root_entry` is one per-distribution value, so a mixed-architecture estate needs **two** `distributions` entries, not two artifacts under one. Version floors are enforced at assembly, not by the schema (a `pattern` cannot compare 2.9.0 against a 2.47.0 floor): Prometheus ≥ 2.47.0 for the OTLP receiver, Grafana ≥ 9.0.0, collector ≥ 0.90.0. Common to every type: `artifacts` keyed by architecture with a `source` that is a `url` (host pulls), a `file` (controller pushes), or an `image` (controller pulls the named `images` entry, extracts `path_in_image`, pushes the result) — no fallback between them. `sha256` lives **inside** the `source`, not beside it: it is required for `url`/`file` and absent for `image`, whose archive does not exist until the controller builds it, so the checksum is computed after extraction. Verification always happens on the machine after transfer. A missing architecture is an error, never substituted; declare `any` for an arch-independent archive. An `image` source may also carry `exclude: [<relative path>…]` to leave directories out of the built archive — every byte is transferred to every machine |
 | `node_pool_templates` | hardware specs | `gke` / `eks` only — a `hosts`, `docker` or `ocp` infrastructure has no node pool the toolkit owns. On `ocp` the machines were sized by whoever installed the cluster, which is why `k8s_node_pool_template` is asked for on the two cloud branches and not on the shared Kubernetes one |
-| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on `gke`/`eks`; **GG8 only** on `hosts`, via `host_gridgain_distribution`; **GG8 and GG9** on `docker`, via `docker_image`; **GG8 and GG9** on `ocp`, via the shared `image` — GG8 was refused until `gridgain/ultimate` had been measured under `restricted-v2`; see §The `ocp` platform. An `ocp` template is the `gke`/`eks` field set minus `k8s_node_pool_template`; the cluster entry takes the same `k8s_namespace`/`k8s_service_name`, because an OpenShift project is a Namespace. On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
+| `cluster_templates` → `clusters` | GG cluster (nodes, ports, resources, data_models, telemetry) | On k8s, `k8s_jvm_max_mem`/`k8s_jvm_min_mem` are **required** and consumed by GridGain 9 only — see §Gotchas. GG8/GG9 via image/template on `gke`/`eks`; **GG8 and GG9** on `hosts`, via `host_gridgain_distribution` — whose `gridgain_major_version` is what selects the plugin, the config format and the activation mechanism; **GG8 and GG9** on `docker`, via `docker_image`; **GG8 and GG9** on `ocp`, via the shared `image` — GG8 was refused until `gridgain/ultimate` had been measured under `restricted-v2`; see §The `ocp` platform. An `ocp` template is the `gke`/`eks` field set minus `k8s_node_pool_template`; the cluster entry takes the same `k8s_namespace`/`k8s_service_name`, because an OpenShift project is a Namespace. On `docker` the template also requires `docker_jvm_max_mem`/`docker_jvm_min_mem` and `docker_work_dir`, and the cluster entry takes `docker_container_prefix`. On `hosts`: `nodes` must equal the enabled-host count exactly, at most one enabled cluster per infrastructure, `host_modules` must include `ignite-rest-http` and must not include `ignite-kubernetes`, and `host_rest_address` must be declared |
 | `databases` | non-GG DB | `postgres` / `mariadb` (image, port, databaseName, authSecretRef, initDdlLocation, resources, storage) |
 | `cdc_connectors` | Debezium + Kafka pipeline (source: a `databases`; sink: a `clusters`) | `kafka`, `kafka_connect` (`plugins[]`, `jvm_opts[]`), `debezium`, top-level `connectors[]` (extra Connect registrations w/ `__PLACEHOLDER__`→secret) |
 | `secrets` | k8s Secret the toolkit materializes at deploy time, and the payload the `hosts` platform reads on the controller | payload from a pluggable `source` (v1: `kind: sops` — a SOPS-encrypted YAML file + a top-level `path` key). **`source.file` resolves against the demo config's own directory**, like `gridgain8_license_file` and the generator's paths — so with the config at `src/main/resources/demo-config.yaml`, `file: secrets/x.sops.yaml` means `src/main/resources/secrets/x.sops.yaml`, not a `secrets/` at the repo root. Referenced **by name** from the `*_secret_ref` fields below |
@@ -219,6 +220,57 @@ timeouts — only what is installed and how it is started. See **GG9 on hosts** 
 firewall ports, and the **JDK**. The cluster owns the **GridGain distribution** (a per-cluster choice),
 its config, licence, env file, systemd unit and start.
 
+### Resolving a distribution by version
+
+A `distributions` artifact has three peer `source.kind`s — `url`, `file`, `image` — and **there is
+deliberately no fallback between them**. Extraction from a container image is not a workaround for the
+absence of downloads; it is a choice you make per artifact.
+
+GridGain publishes its server distributions as unauthenticated downloads under `www.gridgain.com/media/`,
+so `kind: url` works today with no code change. `resolveDistribution` writes the entry for you:
+
+```
+./gradlew resolveDistribution -Pproduct=gridgain9-db -PdistributionVersion=9.1.28
+./gradlew resolveDistribution                      # lists the catalogue
+```
+
+It probes, downloads, measures and prints a pasteable block. Optional `-Prespin=-1` picks a specific
+respin (`-Prespin=none` forces the unsuffixed build); `-PentryName=` overrides the suggested key.
+
+⚠️ **There is no `latest`, and the reason is mechanical, not stylistic.** `sha256` is *required* on a
+url source and cannot exist for a version nobody has downloaded; GridGain publishes no machine-readable
+release index (`/api/releases` and `releases.json` both 404); and `distribution.schema.json` rejects
+floating versions outright.
+
+⚠️ **The URL cannot be constructed, only probed.** Names are *almost* uniform and the exceptions are
+unguessable — `gridgain9-odbc-linux-9.1.27-1.zip` but `gridgain9-odbc-linux-9.1.28.zip`, and both
+inverses 404. The task probes candidates and **refuses when more than one exists** rather than choosing
+between a plain build and a respin. A 403 or 500 is reported as *unreachable*, never as *absent*.
+
+⚠️ **`expected_root_entry` is measured, never inferred from the file name.** GridGain's cloud connector
+ships as `gridgain-cloud-connector-2026.1.zip` and unpacks to `gridgain-cloud-connector-2026.1-7/`.
+`install-archive.sh` checks the root only *after* extraction, so a guess fails on a remote machine at
+the end of a large transfer.
+
+**Choosing `url` vs `image`:**
+
+- **GridGain 9 → `url`.** GG9 has a single `lib/` with no optional layout, so there is nothing to trim
+  and the url path loses nothing — while dropping the private-registry credential dependency.
+- **GridGain 8 Ultimate/Enterprise on several hosts → `image`.** `exclude` and the automatic
+  `libs/optional` reduction live in `ImageArtifactExtractor`, i.e. the **image path only**. A
+  url-sourced Ultimate ships all ~1.15 GB to every machine, including the `integration` tree a server
+  never loads.
+
+⚠️ **Zip is the only format GridGain publishes, so a url source needs `unzip` on every host.** The image
+path always produces a tar.gz and never needed it. Preflight demands it up front
+(`HostClusterInstall.archiveCommandsFor`) rather than dying mid-install, but a minimal RHEL image does
+not have it.
+
+**Catalogue scope.** Only products that map to a `distributions.type` the toolkit installs are listed —
+the GG9 server distribution and the three GG8 editions. The CLI, the JDBC/ODBC/C++ clients, the DR
+connector, Control Center on-premise and the cloud connector are all downloadable from the same path and
+have **no distribution type**, so cataloguing them would emit config the schema rejects.
+
 ⚠️ **One cluster per host infrastructure**, enforced by `HostGridGainClusterSpecAssembler` and
 deliberately kept — two clusters on one machine set would collide on ports, install directories and
 unit names. The split above describes *which layer owns what*, **not** a licence to co-tenant: the
@@ -250,6 +302,30 @@ unit, remove conf + licence + toolkit state. Data goes only per `host_storage.re
 logs always stay; the JDK and distribution stay so a redeploy does not re-fetch them. Infrastructure:
 reverts tuning and firewall, removes the roots, then the service identity — and refuses outright while any
 cluster is still recorded on those machines.
+
+⚠️ **`teardownInfrastructure` on `hosts` is incomplete in two ways today. Verify over ssh; do not
+trust its exit code.** Both report success. Cluster teardown is unaffected.
+
+1. **It can remove nothing at all.** Existence is exact equality against the prepared marker, which
+   embeds the JDK version *and a digest of every host script the toolkit renders*. Any drift reads as
+   "not found": state is cleared, exit 0, every unit and file left in place. The script digest moves
+   on plugin upgrades, so this can hit an estate nobody edited.
+   (`docs/superpowers/backlog/teardown-infrastructure-no-ops-on-marker-drift.md`)
+2. **Even when it runs, it leaves the metrics unit.** Nothing removes
+   `gg-node-exporter-<infra>`; it keeps running on 9100 with its binary already deleted, and because
+   it runs as the service user, the `userdel` step then fails — a failure `|| true` discards. So the
+   `gridgain` user and group survive too.
+   (`docs/superpowers/backlog/infrastructure-teardown-leaves-the-metrics-unit.md`)
+
+Check per machine, and stop the exporter **before** removing the identity:
+
+```bash
+systemctl list-units --all | grep -iE 'gridgain|gg-'
+ls /etc/systemd/system | grep -iE 'gridgain|gg-'
+ls -d /opt/gridgain-demo /var/lib/gridgain-demo 2>/dev/null
+ss -lntp | grep 9100
+id gridgain
+```
 
 **OS tuning is reversible by construction.** Every artifact is a uniquely named drop-in file the toolkit
 owns (`/etc/sysctl.d/99-gridgain-<infra>.conf`, `/etc/security/limits.d/99-gridgain-<infra>.conf`, a
@@ -430,13 +506,21 @@ cluster you are comparing against uses for its data region.
 **`host_jvm_opts` ships a demo heap** (`-Xms3g -Xmx3g` on the shape above) against GG8's 8g. Not a
 bug, but not a comparison either.
 
-**There is NO thread-pool surface for GG9.** `host_thread_pools` is GridGain 8 only — the assembler
-*rejects* a non-zero value on a GG9 cluster rather than ignoring it — and nothing replaces it. Every
-GG9 pool is therefore auto-sized from `Runtime.availableProcessors()`, the same miscount that costs
-GG8 3.66x at 384 in flight on an SMT machine. Measured: **1,212 threads on 8 physical cores (152 per
-core)**, against the 638 (80 per core) that GG8's unfixed defaults produced. Changing one means
-hand-editing `conf/gridgain-config.conf` on every node (`ignite.raft.disruptor.stripes` and friends);
-closing the gap properly is the GG9 analogue of `host_thread_pools`.
+**GG9 has its own thread-pool surface: `host_v9_thread_pools`.** It is deliberately *not*
+`host_thread_pools`, which stays GridGain 8 only — the assembler **rejects** either key on the other's
+major version rather than ignoring it, because the two drive different products through different
+mechanisms: Spring bean properties against HOCON paths under `ignite`.
+
+Every key is optional, and an absent key is **not rendered at all** — GridGain 9 validates strictly
+and rejects an unknown key *by name* at node start, so restating a default buys nothing and breaks
+the day it is renamed. The upside is that a typo fails loudly at startup instead of tuning nothing in
+silence. Each key has `minimum: 1`, so 0 is unreachable from a file and can only mean absent.
+
+⚠️ **The default sizing is wrong on an SMT machine in the same way GG8's is.** GG9 also sizes from
+`Runtime.availableProcessors()`: measured on an 8-core ppc64le LPAR at SMT=8, a GG9 node ran
+**1,212 threads on 8 physical cores (152 per core)** against the 638 (80 per core) GG8's unfixed
+defaults produce there. For GG8 that miscount cost 3.66x at 384 in flight, so this is a knob worth
+setting rather than a curiosity.
 
 **The generator's zone DDL carries no `REPLICAS`.** `Gg9SqlDdlRenderer` emits
 `CREATE ZONE IF NOT EXISTS gg_demo_zone WITH STORAGE_PROFILES = 'default';`, so GG9 defaults the zone
@@ -1450,7 +1534,7 @@ differ in configuration — they are **different mechanisms**, and almost nothin
 |---|---|---|
 | Model | **push** — the source sends | **pull** — the target fetches |
 | Configured by | Spring beans in the node config, at deploy time | **REST calls to the target**, at activation time |
-| Platforms | `gke` ↔ `gke`, `eks` ↔ `eks` (**one or two infrastructures**), `hosts` ↔ `hosts`, `docker` ↔ `docker` (either network) | `hosts` ↔ `hosts`, **`docker` ↔ `docker`** (one network) |
+| Platforms | `gke` ↔ `gke`, `eks` ↔ `eks` (**one or two infrastructures**), `hosts` ↔ `hosts`, `docker` ↔ `docker` (either network) | `gke` ↔ `gke`, `eks` ↔ `eks` (**one or two infrastructures**; two is unidirectional only), `hosts` ↔ `hosts`, `docker` ↔ `docker` (one network) |
 | Unit of work | the sender group | the replication (one per connection) |
 | Lifecycle | resume / pause | create → start → stop (**no pause**) |
 | Peer port | the template's `local_inbound_port` | the source's **client port** (10800) |
@@ -1462,18 +1546,21 @@ Refused on both: `ocp`, any cross-platform pair, any cross-version pair.
 
 | Pair | GridGain 8 | GridGain 9 |
 |---|---|---|
-| Two Kubernetes clusters, **one** `infrastructure` | ✓ receiver Service DNS | ✗ (Kubernetes refused outright) |
-| Two Kubernetes clusters, **two** infrastructures | ✓ the receiver LoadBalancer's recorded address | ✗ refused |
+| Two Kubernetes clusters, **one** `infrastructure` | ✓ receiver Service DNS | ✓ the **source's** Service DNS |
+| Two Kubernetes clusters, **two** infrastructures | ✓ the receiver LoadBalancer's recorded address | ✓ the **source's** `<cluster>-dcr-source` LoadBalancer (⚠️ unidirectional only) |
 | Two `docker` clusters, one `docker_network_name` | ✓ container names | ✓ container names |
 | Two `docker` clusters, **two** networks | ✓ `host.docker.internal:<published receiver port>` | ✗ refused |
 | `hosts` ↔ `hosts` | ✓ `advertised_address` | ✓ `advertised_address` |
 | `hosts` ↔ Kubernetes, `hosts` ↔ `docker` (**mixed**) | ✗ refused | ✗ refused |
 
-**Two Kubernetes clusters on two infrastructures replicate**, and the address is the only part of
-it that is unusual. A receiver Service's DNS name resolves only inside the cluster that owns it, so
-a cross-infrastructure receiver is rendered `type: LoadBalancer` instead; the address the cloud
-assigns it is discovered when that cluster is deployed and written to its `deployment.yaml` record
-as `dcr_receiver_endpoints`. The peer reads it back from there.
+**Two Kubernetes clusters on two infrastructures replicate on both versions**, and the address is the
+only part of it that is unusual. **On GridGain 8** a receiver Service's DNS name resolves only inside
+the cluster that owns it, so a cross-infrastructure receiver is rendered `type: LoadBalancer`
+instead; the address the cloud assigns it is discovered when that cluster is deployed and written to
+its `deployment.yaml` record as `dcr_receiver_endpoints`. The peer reads it back from there.
+**GridGain 9 does the mirror image** — it pulls, so it is the *source* that gets a LoadBalancer and
+records `dcr_source_endpoints`; see *Two Kubernetes clusters* under the GridGain 9 section, including
+why bidirectional is refused there.
 
 ⚠️ **An address that is not recorded is never guessed.** Deployment order does not matter, but
 *some* order does: a cluster deployed before its peer resolves no peer address, renders no sender
@@ -1722,9 +1809,16 @@ property.
 
 ### Firewall and addressing
 
-**Nothing new is opened.** The target dials the source's **client port**, which every node already
-listens on and `firewallPorts` already includes; the controller reaches the target's **management
-port**, likewise already open. If you find yourself adding a DCR port for GG9, something is wrong.
+**On `hosts` and `docker`, nothing new is opened.** The target dials the source's **client port**,
+which every node already listens on and `firewallPorts` already includes; the controller reaches the
+target's **management port**, likewise already open.
+
+⚠️ **Two Kubernetes infrastructures are the exception, and it is the only one.** The target's nodes
+are in a different cluster, so the source's in-cluster Service name resolves to nothing for them. A
+`<cluster>-dcr-source` **LoadBalancer is rendered on the source**, publishing its `client_port` —
+see *Two Kubernetes clusters* below. That is a real exposure and the only new one GG9 replication
+asks for; within a single Kubernetes infrastructure, and on every other platform, the rule above
+still holds.
 
 ⚠️ **Two directions, and they are opposites.** The controller configures replication over the
 cluster's *externally published* address; the replication then pulls over the source's *internal*
@@ -1735,9 +1829,46 @@ never connects.
 |---|---|---|
 | `hosts` | `host_rest_address`:management | every enabled machine's `advertised_address`:client |
 | `docker` | `127.0.0.1`:**published** management | every container by **name**:client, inside the network |
+| `gke` / `eks`, one infrastructure | **not the controller** — a Job inside the target | `<source>.<namespace>.svc.cluster.local`:client |
+| `gke` / `eks`, two infrastructures | **not the controller** — a Job inside the target | the source's `<cluster>-dcr-source` LoadBalancer:client |
 
 **The source resolves to every node**, not one: a source list of one stops replicating when that
 node restarts.
+
+### Two Kubernetes clusters
+
+Replication on `gke` and `eks` is the one topology where GG9 publishes something, and the direction
+is the **opposite** of GridGain 8's. GG8 exposes the *receiver* on the target; GG9 pulls, so it
+exposes the *source*.
+
+| | One infrastructure (two namespaces) | Two infrastructures |
+|---|---|---|
+| `DcrLocality` | `DERIVED` / `STATED` | `EXPOSED` |
+| Source address | `<source>.<namespace>.svc.cluster.local` | the recorded `<cluster>-dcr-source` LoadBalancer |
+| Rendered on the source | nothing | `dcr-source-service.yaml`, a LoadBalancer on `client_port` |
+| `bidirectional: true` | allowed | ⚠️ **refused by name** |
+
+⚠️ **Bidirectional across two infrastructures is refused deliberately.** Each end pulls from the
+other, so each is also a source and each must publish — but both ends emit a *pull* binding, and the
+publication marker goes only to an end that emits nothing else. Neither would publish, and the pair
+would move no data in both directions at once. Express it as **two unidirectional connections**,
+which publish correctly; the refusal message says so. Bidirectional inside one infrastructure is
+untouched, because nothing has to be published there.
+
+⚠️ **The LoadBalancer is independent of `demo_access`.** Replication publishes its own endpoint and
+is not switched off by the "expose this cluster to my laptop" feature — proven on EKS by running a
+GG9 pair with `demo_access` disabled, where only `west-dcr-source` existed. `max_exposed_nodes` does
+not truncate it either: a truncated source address list is a replication that stops when the wrong
+node restarts.
+
+⚠️ **The ingress field differs by cloud** — GKE publishes `ip`, EKS publishes `hostname`. Asking for
+the wrong one reads empty forever against a perfectly healthy LoadBalancer, so it hangs rather than
+failing.
+
+**The activation itself runs inside the target cluster**, as a Job (`dcr-job.yaml` plus its script
+ConfigMap) using the GG9 CLI already in the cluster image — the controller cannot reach the
+management API, and nothing is exposed to let it. `ocp` is refused at either end; see
+`docs/superpowers/backlog/gg9-replication-on-openshift.md`.
 
 ### On `docker` specifically
 
@@ -1754,18 +1885,36 @@ resolves a sibling on a network they share. Left unchecked it is the worst failu
 both clusters deploy, the replication is created and started and reports healthy, and nothing ever
 arrives.
 
-⚠️ **GridGain 8 replication is still refused on `docker`**, and that is a different fact from the
-platform being unsupported. GG8 renders a sender hub into the node's Spring XML and dials the peer's
-receiver port; the Docker cluster plugin renders no such configuration. GG9 needs no node-side
-configuration at all, which is why it works here and GG8 does not.
+**Both versions replicate on `docker`.** GG8 was once refused here — the Docker cluster plugin
+rendered no sender hub — but `DockerClusterTemplateModel` calls `putV8DcrContext` and a GG8 Docker
+pair was proven across two networks on 2026-10-21, reaching the peer at
+`host.docker.internal:<published receiver port>`. GG9 on Docker needs **one shared network**, because
+it dials the source by container name; GG8 works on either, because its receiver port is published.
 
-### Not run against live clusters
+### Verified against live clusters
 
-⚠️ **This has never replicated a row.** The request shapes were read off `gg-dcr`'s own request
-classes and are pinned by tests through a real HTTP client, but no GG9 pair has been available since
-the Power lab moved on. Treat the first deployment as the real test, and verify with
-`GET /management/v1/dcr/replications/{name}` showing `REPLICATING` — not by the task's exit code,
-which a drift-skipped deploy also returns 0 for.
+GridGain 9 replication has moved real rows — INSERT, UPDATE and DELETE — on every platform it
+supports:
+
+| Platform | Topology | Verified |
+|---|---|---|
+| `gke` | two infrastructures, `us-west1` → `us-east1` | 2026-10-23 |
+| `eks` | two infrastructures, `us-west-2` → `us-east-1` | 2026-10-24 |
+| `hosts` | AWS, ARM → Intel | 2026-10-11 |
+| `hosts` | IBM Power, ppc64le → ppc64le | 2026-10-26 |
+| `docker` | two clusters, one network | 2026-10-11 |
+
+GridGain 8 is verified on `gke` (2026-10-20, and cross-region 2026-10-22), `eks` (2026-10-24),
+`hosts` on AWS (2026-10-11), `hosts` on IBM Power (2026-10-26), and `docker` across **two** networks
+(2026-10-21).
+
+Still verify each new deployment rather than trusting the exit code — a drift-skipped deploy also
+returns 0. `GET /management/v1/dcr/replications/{name}` showing `REPLICATING` is the liveness check;
+the row count below is the one that proves data crossed.
+
+⚠️ **Not verified: the GG9 `bidirectional: true` loop behaviour** (see above), and replication on
+`ocp` at either end, which is refused and tracked in
+`docs/superpowers/backlog/gg9-replication-on-openshift.md`.
 
 ### Proving that data actually crossed
 
