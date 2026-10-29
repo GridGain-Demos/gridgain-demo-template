@@ -133,6 +133,40 @@ run, the more that dominated** — backwards from what a quick sanity run should
 A `count` warmup can overshoot by up to `concurrency - 1`, for the same reason
 `duration: {kind: count}` can.
 
+⚠️ **`MigrateOpsV9toV10` writes `warmup: {kind: none}` into every pre-v10 scenario**, to preserve
+what the file did before. So an ops file that has not been edited since the migration measures its
+own cold start in every scenario, silently. `BenchmarkWarmupValidator` now **warns** (never fails) on
+`kind: none` paired with `duration: until_stop_condition` or `time` — the measurement shapes.
+`count` is left alone: that is the loader shape, where measuring everything is correct.
+
+Measured on the IBM Power11 lab 2026-10-28, two otherwise identical runs at 24 operations in flight:
+
+| | `achieved_rate` | `latency_p99_ms` | `latency_max_ms` | `read_miss_count` |
+|---|---|---|---|---|
+| `warmup: {kind: none}` | 43,590 | 3.511 | 393.7 | 529 |
+| `warmup: {kind: time, value: "PT90S"}` | 45,039 | 4.507 | 250.0 | **0** |
+
+The 529 "misses" were against a **fully populated** key space — they were cold-start artifacts, and
+they are the clearest tell that a run measured its own warm-up. `result.yaml` records which setting
+produced a given file in **`warmup_applied`**, so two results can be compared without guessing.
+
+### What `latency_*` actually measures
+
+The window opens immediately before the target call and closes immediately after it. Key selection
+and row generation are **outside** it (corrected 2026-10-29 after a review; they used to be inside,
+so every sample carried the client's own cost — which differs by architecture and so biased a
+ppc64le-vs-x86 latency *ratio*, not just the absolute numbers).
+
+⚠️ **These are CLOSED-LOOP service latencies at a fixed concurrency, not response times.** A worker
+issues its next operation only after the previous one returns, and the rate limiter's slot time is
+not carried into the measurement. When the target stalls for S ms, each of N workers records ONE
+sample of S ms; an open-loop client at the same rate would have recorded many. So a stall lands in
+`latency_max_ms` and barely moves `latency_p99_ms` — the classic coordinated-omission
+understatement. This is the same quantity YCSB reports without `-target`.
+
+Fine for comparing platforms at equal concurrency, which is what the figures are usually for. **Not
+a service-level response time**, and it must not be quoted as one.
+
 ### `key_space` — the domain of keys the scenario addresses
 
 ```yaml
@@ -176,12 +210,20 @@ stop_reason: "time elapsed"
 wall_time: "PT6M"               # whole run, warmup included
 measured_operations: 250000
 measured_window: "PT5M"         # what achieved_rate and the percentiles describe
+warmup_applied: "time: PT90S"   # what was EXCLUDED; "none" = the figures include the cold start
 latency_p50_ms: 0.41
 latency_p90_ms: 0.88
 latency_p99_ms: 2.15
+latency_p999_ms: 18.40          # the one in a thousand — see the note below
 latency_max_ms: 61.02
 latency_mean_ms: 0.52
 ```
+
+⚠️ **Quote `latency_p999_ms`, not `latency_max_ms`, for a tail figure.** `max` is a single
+operation out of millions and moves with anything transient — a GC pause, a checkpoint, a scheduler
+hiccup. On the Power lab 2026-10-28 `p99` read 17.8 ms while `max` was over a second, with nothing
+reported in between; p99.9 puts a number there, backed by thousands of samples at these rates.
+A regulated audience will ask for it.
 
 ⚠️ **`rows_per_write` is the one to read first when comparing two runs.** One operation is one
 *business event*, which a `data.yaml` with `parent-fk-ref` children turns into several row writes
