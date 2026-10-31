@@ -20,13 +20,54 @@ Internally to GridGain, there is a [project goals presentation](https://docs.goo
 There is a MariaDB slack channel dedicated to asking for help and requesting enhancements on this proejct:
 - **#proj-gridgain-gradle-plugin**
 
-There are currently two main components:
+There are currently three main components:
 - **gridgain-demo-gradle-plugin** which implements the deployment tasks
 - **gridgain-demo-ui** which provides a UI layer over configuration and task deployment
+- **gridgain-demo-data-generator** which drives load against a deployed cluster. This project
+  depends on it directly (`dataGeneratorGg8Runtime` / `dataGeneratorGg9Runtime` in
+  `build.gradle.kts`) and its scenarios live in `src/main/resources/generator/`.
 
 Users of the toolkit have no need to reference the repositories for the above projects. Those projects have been built and published to a GridGain hosted maven repository. The **gridgain-demo-template** project has been designed to abstract away the complexity of configuring the use of those projects in a gradle environment.
 
 The gradle layer is a very thin layer over a set of Kotlin classes. These classes could be packaged in a way that they could be used without the gradle layer. If that is something you would need, please request it in the slack channel mentioned above.
+
+## Where a demo can run
+
+A demo is deployed onto an **infrastructure**, and five platforms are supported:
+
+| Platform | What it is | CLI it needs | Scaffolded by the wizard? |
+|---|---|---|---|
+| `gke` | Google Kubernetes Engine | `gcloud`, `kubectl` | yes |
+| `eks` | Amazon Elastic Kubernetes Service | `aws`, `eksctl`, `kubectl` | yes |
+| `hosts` | Machines you already have, reached over SSH | `ssh` | yes |
+| `docker` | Containers on one Docker daemon, over the local socket | `docker` | no — configure by hand |
+| `ocp` | OpenShift, including a local CRC cluster | `oc` | no — configure by hand |
+
+`docker` and `ocp` are fully deployable; they are simply not among the wizard's
+`-Pwizard.platform` choices yet, so a config for either is written by hand or copied from an
+existing one. `./gradlew validateRequirements` checks the CLIs for whichever platforms your
+config actually uses and names anything missing, with where to get it.
+
+Unlike `gke` and `eks`, deploying a `hosts`, `docker` or `ocp` infrastructure **prepares** rather
+than provisions: it configures machines, or creates networks and volumes, or works inside a cluster
+that already exists — but it never creates or destroys the machines, the daemon or the OpenShift
+cluster themselves. Those are yours, which is also why `ocp` has no node pools to size and no zones
+to spread across.
+
+### More than one GridGain node per machine (`hosts`)
+
+On `hosts`, a machine can carry several GridGain server nodes. Set `host_nodes_per_host` on the
+cluster template; `nodes` must then equal the enabled-host count times that number. Each node gets
+its own whole physical cores, ports, log and data directories, rendered configuration and systemd
+unit, and is deployed, started, watched and torn down individually — the installed distribution is
+shared. It also needs `host_cpus_per_node` set **on the cluster entry** — not on the template, where it is not a valid key — and it gives up anti-affinity: a replica may land on the
+same machine as its primary, so losing one machine can take both copies.
+
+⚠️ It also multiplies **licence** demand. A machine presents `host_nodes_per_host` x
+`host_cpus_per_node` CPUs, and a GridGain 8 cluster over its licence's `max-cpus` shuts itself down
+cleanly after the grace period **while the deployment record still reads ACTIVE** — a failure that
+points at nothing. A GridGain 9 licence has no grace period at all, so cap `host_cpus_per_node`
+before raising the node count.
 
 
 ## GridGain Demo Template
@@ -120,6 +161,28 @@ Please do that before using the tool.
 
   The toolkit checks each of those components and its version range, so a partial install is
   reported by name rather than failing later inside a deploy: `./gradlew validateRequirements`.
+
+- For the `hosts` platform
+    - Machines you can reach over SSH, and an account on them that can escalate to root.
+      Authentication is by key or password; a password lives in the SOPS-encrypted secrets file
+      (see [Secrets](#secrets)) and never in `demo-config.yaml`.
+    - Nothing is required on the machines up front beyond a shell — `deployInfrastructure`
+      installs the JDK and the rest. `./gradlew validateRequirements` reports what is missing,
+      on the controller and on each host.
+
+- For the `docker` platform
+    - A running Docker daemon reachable over the local socket, and nothing else. No cloud account,
+      no SSH, no registry: images are pulled from wherever your config names them.
+    - This is the cheapest way to try the toolkit end to end, and the only one that works offline
+      once the images are local.
+
+- For the `ocp` (OpenShift) platform
+    - The `oc` CLI, logged in to the cluster you intend to use.
+    - A local cluster via CRC (CodeReady Containers) works and is what this has been exercised
+      against. OpenShift's `restricted-v2` SCC assigns each pod an arbitrary UID and fsGroup from
+      the project's own range and refuses any the manifest names itself — the toolkit's cluster
+      manifests therefore name neither, so this needs nothing from you. It is worth knowing if you
+      add manifests of your own.
 
 - For a writable image registry (required for the test-client and data-generator images)
 
@@ -551,6 +614,15 @@ value it needs. Then run `./gradlew launchPluginUi` to fine-tune via the UI.
 | `src/main/resources/generator/ops.yaml` | Data-generator scenarios: one worked example load profile. The path the UI looks at on startup. |
 | `src/main/resources/generator/data.yaml` | The data schemas those scenarios generate against. Always paired with the `ops.yaml` beside it. |
 | `.gitignore` | Ignores `demo-config.yaml`, license files, build outputs, IDE files. |
+| `QUICKSTART.md` / `MCP_Quickstart.md` | The short path for a first setup, and how to drive the toolkit from an AI agent. |
+| `.claude/skills/gridgain-demo-toolkit/` | Vendored copy of the toolkit skill — what an AI agent reads to learn the task surface, element types and config schema. Refreshed from the plugin that authors it. |
+| `.claude/skills/gridgain-demo-data-generator/` | Vendored copy of the generator skill — the `ops.yaml` / `data.yaml` config surface and semantics. |
+| `CLAUDE.md` | Project instructions an agent picks up automatically in this directory. |
+| `scripts/bootstrap-secrets.sh` | Creates the SOPS key and the encrypted secrets file. See [Secrets](#secrets). |
+| `scripts/encrypt-secrets.sh` | Bulk-editing path only: encrypts a plaintext secrets file and removes the plaintext. Prefer `sops src/main/resources/secrets/demo-secrets.sops.yaml`, which edits in place and never writes plaintext to disk. |
+| `.sops.yaml.example` | Template for the SOPS config that names your key; copy to `.sops.yaml`. |
+| `src/main/resources/secrets/demo-secrets.yaml.example` | Template for the secrets file itself; never commit the decrypted form. |
+| `.githooks/pre-commit` | Refuses to commit a secrets file that was never encrypted — the check `.gitignore` cannot do, since the file has the same name either way. **Enable it:** `git config core.hooksPath .githooks`. |
 
 ### The data generator's scenarios file
 
