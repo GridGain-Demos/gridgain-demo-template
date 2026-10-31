@@ -15,10 +15,10 @@ starting the MCP server, registering it with your agent, and which of its tools 
 which change things and which are destructive.
 
 The GridGain Demo Toolkit is a set of tools for deploying GridGain clusters in various environments.
-Internally to GridGain, there is a [project goals presentation](https://docs.google.com/presentation/d/1EafadCta4LH6VcilLQFJ4wfXdda5J67i/edit?slide=id.p1#slide=id.p1) that may be useful for understanding the structure of the toolkit. This presentation covers the currently supported environments as well as future considerations, so we will not try to keep that information synchonrized here.
+Internally to GridGain, there is a [project goals presentation](https://docs.google.com/presentation/d/1pBmEq7PyT7anclKrISfL0bXISyiWBY5T/edit?slide=id.p1#slide=id.p1) that may be useful for understanding the structure of the toolkit. This presentation covers the currently supported environments as well as future considerations, so we will not try to keep that information synchonrized here.
 
 There is a MariaDB slack channel dedicated to asking for help and requesting enhancements on this proejct:
-- **#proj-gridgain-gradle-plugin**
+- **#proj-demo-toolkit**
 
 There are currently three main components:
 - **gridgain-demo-gradle-plugin** which implements the deployment tasks
@@ -40,13 +40,32 @@ A demo is deployed onto an **infrastructure**, and five platforms are supported:
 | `gke` | Google Kubernetes Engine | `gcloud`, `kubectl` | yes |
 | `eks` | Amazon Elastic Kubernetes Service | `aws`, `eksctl`, `kubectl` | yes |
 | `hosts` | Machines you already have, reached over SSH | `ssh` | yes |
-| `docker` | Containers on one Docker daemon, over the local socket | `docker` | no — configure by hand |
-| `ocp` | OpenShift, including a local CRC cluster | `oc` | no — configure by hand |
+| `docker` | Containers on one Docker daemon, over the local socket | `docker` | yes |
+| `ocp` | OpenShift, including a local CRC cluster | `oc` | yes |
 
-`docker` and `ocp` are fully deployable; they are simply not among the wizard's
-`-Pwizard.platform` choices yet, so a config for either is written by hand or copied from an
-existing one. `./gradlew validateRequirements` checks the CLIs for whichever platforms your
-config actually uses and names anything missing, with where to get it.
+`./gradlew validateRequirements` checks the CLIs for whichever platforms your config actually uses
+and names anything missing, with where to get it.
+
+**What each platform costs you at the monitor question.** This is a schema constraint rather than a
+preference, and it is the one place the five platforms genuinely differ in what the wizard will
+accept:
+
+- **Control Center** runs on `gke` and `eks` only, so `-Pwizard.monitor=control-center` is refused
+  for `hosts`, `docker` and `ocp`.
+- **Prometheus and Grafana** the wizard writes for `gke` and `eks`. The schema also accepts `hosts`
+  and `ocp`, but the wizard does not write one there yet, and says so rather than silently
+  collecting an answer it would discard — choose no monitor and add it in the configuration editor
+  afterwards. On `docker` it is refused outright, because that schema does not accept `docker`
+  at all.
+- **A `docker` demo therefore takes `-Pwizard.monitor=none`**, which is also the fastest way to get
+  a cluster up: no cloud account, no SSH, no registry.
+
+**Two platforms are told where to go rather than asked.** `docker` and `ocp` each need the context
+naming the daemon or cluster to use, and the wizard reads it from the CLI you have already pointed
+at one — `docker context show` and `oc config current-context`. For OpenShift, `-Pwizard.ocpContext`
+overrides what it finds, which matters more often than it sounds: if you also use EKS, your current
+`oc` context is quite possibly an EKS one. Neither platform asks for a region or zones; both are
+recorded as local placeholders.
 
 Unlike `gke` and `eks`, deploying a `hosts`, `docker` or `ocp` infrastructure **prepares** rather
 than provisions: it configures machines, or creates networks and volumes, or works inside a cluster
@@ -328,7 +347,9 @@ cd ../my-demo
     -Pwizard.secret.gg9_license_file=cluster/gridgain-license.json
 #
 # The four choices, and what each costs you:
-#   -Pwizard.platform       gke, eks or hosts (comma-separate for more than one)
+#   -Pwizard.platform       gke, eks, hosts, docker or ocp (comma-separate for more
+#                           than one). docker is the cheapest to try: it needs only a
+#                           running daemon, and -Pwizard.monitor=none.
 #   -Pwizard.ggVersion      8 or 9
 #   -Pwizard.monitor        control-center, or none. A cluster deploys and serves traffic
 #                           without one; control-center additionally needs
